@@ -16,8 +16,49 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 #[cfg(target_os = "windows")]
 static HOOK_HANDLE: AtomicPtr<core::ffi::c_void> = AtomicPtr::new(core::ptr::null_mut());
+#[cfg(target_os = "windows")]
+static KEYBOARD_HOOK_HANDLE: AtomicPtr<core::ffi::c_void> = AtomicPtr::new(core::ptr::null_mut());
+#[cfg(target_os = "windows")]
+static WIN_V_DOWN: AtomicBool = AtomicBool::new(false);
 
 static TOGGLING: AtomicBool = AtomicBool::new(false);
+
+#[cfg(any(target_os = "windows", test))]
+fn should_intercept_win_v(vk_code: u32, win: bool, ctrl: bool, shift: bool, alt: bool) -> bool {
+    vk_code == b'V' as u32 && win && !ctrl && !shift && !alt
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_intercept_win_v;
+
+    #[test]
+    fn intercepts_only_plain_win_v() {
+        assert!(should_intercept_win_v(
+            b'V' as u32,
+            true,
+            false,
+            false,
+            false
+        ));
+
+        for modifiers in [
+            (b'C' as u32, true, false, false, false),
+            (b'V' as u32, false, false, false, false),
+            (b'V' as u32, true, true, false, false),
+            (b'V' as u32, true, false, true, false),
+            (b'V' as u32, true, false, false, true),
+        ] {
+            assert!(!should_intercept_win_v(
+                modifiers.0,
+                modifiers.1,
+                modifiers.2,
+                modifiers.3,
+                modifiers.4,
+            ));
+        }
+    }
+}
 
 /// RAII guard that ensures TOGGLING is always reset, even on panic.
 struct ToggleGuard;
@@ -85,6 +126,26 @@ pub fn toggle_window(app: &AppHandle) {
         }
     } else {
         log::warn!("[toggle_window] main window not found");
+    }
+}
+
+pub fn show_clipboard_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let focused = window.is_focused().unwrap_or(false);
+
+        #[cfg(target_os = "windows")]
+        if !focused {
+            crate::paste::save_foreground_window();
+            unsafe {
+                let _ = AllowSetForegroundWindow(0xFFFFFFFF);
+            }
+        }
+
+        let _ = app.emit("show-clipboard", ());
+        let _ = window.show();
+        let _ = window.set_focus();
+    } else {
+        log::warn!("[show_clipboard_window] main window not found");
     }
 }
 
@@ -205,6 +266,50 @@ unsafe extern "system" fn mouse_hook_callback(
     unsafe { CallNextHookEx(hook, n_code, w_param, l_param) }
 }
 
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn keyboard_hook_callback(
+    n_code: i32,
+    w_param: WPARAM,
+    l_param: LPARAM,
+) -> LRESULT {
+    if n_code >= 0 {
+        let msg = w_param.0 as u32;
+        let hook_struct = &*(l_param.0 as *const KBDLLHOOKSTRUCT);
+
+        if hook_struct.vkCode == VK_V.0 as u32 {
+            let is_key_down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+            let is_key_up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+
+            if is_key_up && WIN_V_DOWN.swap(false, Ordering::SeqCst) {
+                return LRESULT(1);
+            }
+
+            if is_key_down {
+                if WIN_V_DOWN.load(Ordering::SeqCst) {
+                    return LRESULT(1);
+                }
+
+                let win = (GetAsyncKeyState(VK_LWIN.0 as i32) as u16) & 0x8000 != 0
+                    || (GetAsyncKeyState(VK_RWIN.0 as i32) as u16) & 0x8000 != 0;
+                let ctrl = (GetAsyncKeyState(VK_CONTROL.0 as i32) as u16) & 0x8000 != 0;
+                let shift = (GetAsyncKeyState(VK_SHIFT.0 as i32) as u16) & 0x8000 != 0;
+                let alt = (GetAsyncKeyState(VK_MENU.0 as i32) as u16) & 0x8000 != 0;
+
+                if should_intercept_win_v(hook_struct.vkCode, win, ctrl, shift, alt) {
+                    WIN_V_DOWN.store(true, Ordering::SeqCst);
+                    if let Some(app) = APP_HANDLE.get() {
+                        show_clipboard_window(app);
+                    }
+                    return LRESULT(1);
+                }
+            }
+        }
+    }
+
+    let hook = HHOOK(KEYBOARD_HOOK_HANDLE.load(Ordering::SeqCst));
+    unsafe { CallNextHookEx(hook, n_code, w_param, l_param) }
+}
+
 pub fn install_mouse_hook(app: &AppHandle) {
     #[cfg(target_os = "windows")]
     {
@@ -222,6 +327,21 @@ pub fn install_mouse_hook(app: &AppHandle) {
             log::info!("Global mouse hook installed (Ctrl+Shift+RightClick / Ctrl+Alt+RightClick)");
         } else {
             log::warn!("Failed to install mouse hook");
+        }
+    }
+}
+
+pub fn install_keyboard_hook(app: &AppHandle) {
+    #[cfg(target_os = "windows")]
+    {
+        APP_HANDLE.set(app.clone()).ok();
+        let hook =
+            unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook_callback), None, 0) };
+        if let Ok(h) = hook {
+            KEYBOARD_HOOK_HANDLE.store(h.0, Ordering::SeqCst);
+            log::info!("Global keyboard hook installed (Win+V)");
+        } else {
+            log::warn!("Failed to install keyboard hook for Win+V");
         }
     }
 }

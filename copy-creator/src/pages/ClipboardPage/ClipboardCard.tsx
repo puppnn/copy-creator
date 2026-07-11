@@ -76,6 +76,26 @@ function ClipboardCardInner({
     if (!labelOpen) onPaste(record);
   }, [onPaste, record, labelOpen]);
 
+  const handleCardClick = useCallback(
+    async (e: React.MouseEvent) => {
+      if (labelOpen) return;
+      if (record.type !== "link" || !e.ctrlKey) {
+        handlePaste();
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        const url = await getRecordContent(record);
+        await invoke("open_external_link", { url });
+      } catch (error) {
+        console.error("Failed to open link:", error);
+      }
+    },
+    [getRecordContent, handlePaste, labelOpen, record],
+  );
+
   const handleDelete = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
@@ -154,23 +174,14 @@ function ClipboardCardInner({
   const hasLabel = Boolean(record.is_api_key && record.label);
   const isUnlabeled = Boolean(record.is_api_key && !record.label);
 
-  // Keep badge text in local state to ensure re-render on label change
-  const [badgeText, setBadgeText] = useState("");
-  useEffect(() => {
-    if (record.label?.note) {
-      setBadgeText(record.label.note);
-    } else if (record.guessed_service) {
-      setBadgeText(record.guessed_service);
-    } else if (record.is_api_key) {
-      setBadgeText("未标注");
-    }
-  }, [record.label?.note, record.guessed_service, record.is_api_key]);
+  const badgeText =
+    record.label?.note || record.guessed_service || (record.is_api_key ? "未标注" : "");
 
   return (
     <div
       className={`notification clipboard-card type-${record.type}${record.is_favorite ? " is-favorite" : ""}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}`}
       style={{ "--color": meta.color, "--enter-delay": index } as React.CSSProperties}
-      onClick={handlePaste}
+      onClick={handleCardClick}
       onContextMenu={handleContextMenu}
     >
       <div className="notibar" />

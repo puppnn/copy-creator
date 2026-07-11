@@ -127,6 +127,7 @@ pub fn run() {
             clipboard::start_monitor(app.handle())?;
 
             shortcut::install_mouse_hook(app.handle());
+            shortcut::install_keyboard_hook(app.handle());
 
             // Create hidden radial menu popup window
             {
@@ -176,6 +177,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             db::get_clipboard_records,
             db::get_clipboard_record_content,
+            clipboard::open_external_link,
             db::delete_clipboard_record,
             db::toggle_clipboard_favorite,
             db::get_clipboard_storage_stats,

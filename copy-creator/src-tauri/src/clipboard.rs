@@ -4,11 +4,88 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 fn is_url(text: &str) -> bool {
-    let lower = text.trim().to_lowercase();
-    lower.starts_with("http://")
-        || lower.starts_with("https://")
-        || lower.starts_with("ftp://")
-        || lower.starts_with("ftps://")
+    let trimmed = text.trim();
+    if trimmed.chars().any(char::is_control) {
+        return false;
+    }
+
+    let lower = trimmed.to_lowercase();
+    for prefix in ["http://", "https://", "ftp://", "ftps://"] {
+        if let Some(rest) = lower.strip_prefix(prefix) {
+            return !rest.trim().is_empty();
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::is_url;
+
+    #[test]
+    fn accepts_links_with_default_handlers() {
+        for url in [
+            "https://example.com/path",
+            "HTTP://EXAMPLE.COM",
+            "ftp://files.example.com/archive.zip",
+            " ftps://files.example.com ",
+        ] {
+            assert!(is_url(url), "expected a supported URL: {url}");
+        }
+    }
+
+    #[test]
+    fn rejects_unsupported_or_malformed_links() {
+        for value in [
+            "javascript:alert(1)",
+            "file:///C:/Windows/System32/calc.exe",
+            "https://",
+            "https://example.com\nfile:///C:/secret.txt",
+        ] {
+            assert!(!is_url(value), "expected URL rejection: {value}");
+        }
+    }
+}
+
+#[tauri::command]
+pub fn open_external_link(url: String) -> Result<(), String> {
+    let url = url.trim();
+    if !is_url(url) {
+        return Err("Unsupported link protocol".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows::core::{w, PCWSTR};
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+        let target: Vec<u16> = url.encode_utf16().chain(std::iter::once(0)).collect();
+        let result = unsafe {
+            ShellExecuteW(
+                HWND::default(),
+                w!("open"),
+                PCWSTR(target.as_ptr()),
+                PCWSTR::null(),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+
+        if result.0 as isize <= 32 {
+            return Err(format!(
+                "Failed to open link (ShellExecuteW code {})",
+                result.0 as isize
+            ));
+        }
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("Opening links is currently supported on Windows only".to_string())
+    }
 }
 
 fn is_previewable_image_file(path: &str) -> bool {
