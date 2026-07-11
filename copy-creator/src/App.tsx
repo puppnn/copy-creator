@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import ClipboardPage from "./pages/ClipboardPage";
 import PhrasePage from "./pages/PhrasePage";
 import TranslationPage from "./pages/TranslationPage";
@@ -26,8 +27,54 @@ const NAV_ITEMS = [
 function App() {
   const { t } = useTranslation();
   const [activePanel, setActivePanel] = useState<string>("clipboard");
+  const [unreadCount, setUnreadCount] = useState(0);
   const { themeMode, toggleTheme, loadSettings } = useSettingsStore();
   const [isPinned, setIsPinned] = useState(false);
+
+  const markClipboardRead = useCallback(async () => {
+    try {
+      await invoke("mark_clipboard_read");
+      setUnreadCount(0);
+    } catch (e) {
+      console.error("Failed to mark clipboard as read:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    const cleanup: Array<() => void> = [];
+    invoke<number>("get_clipboard_unread_count")
+      .then((count) => {
+        if (!disposed) setUnreadCount(count);
+      })
+      .catch(console.error);
+    listen<number>("clipboard-unread-changed", (event) => {
+      if (!disposed) setUnreadCount(event.payload);
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else cleanup.push(unlisten);
+    });
+
+    const currentWindow = getCurrentWindow();
+    currentWindow.onFocusChanged(({ payload: focused }) => {
+      if (focused && activePanel === "clipboard") markClipboardRead();
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else cleanup.push(unlisten);
+    });
+    Promise.all([currentWindow.isVisible(), currentWindow.isFocused()]).then(
+      ([visible, focused]) => {
+        if (!disposed && visible && focused && activePanel === "clipboard") {
+          markClipboardRead();
+        }
+      },
+    );
+
+    return () => {
+      disposed = true;
+      cleanup.forEach((unlisten) => unlisten());
+    };
+  }, [activePanel, markClipboardRead]);
 
   useEffect(() => {
     loadSettings().then(() => {
@@ -143,10 +190,20 @@ function App() {
               <button
                 key={item.panelType}
                 className={`sidebar-nav-item ${isActive ? "active" : ""}`}
-                onClick={() => setActivePanel(item.panelType)}
+                onClick={() => {
+                  setActivePanel(item.panelType);
+                  if (item.panelType === "clipboard") markClipboardRead();
+                }}
                 title={t(titleKey)}
               >
-                <span className="sidebar-nav-icon">{Icons[iconKey]}</span>
+                <span className="sidebar-nav-icon">
+                  {Icons[iconKey]}
+                  {item.panelType === "clipboard" && unreadCount > 0 && (
+                    <span className="sidebar-unread-badge">
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </span>
+                  )}
+                </span>
                 <span className="sidebar-nav-label">{t(titleKey)}</span>
               </button>
             );

@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 
 type UnlistenFn = () => void;
 
-export const CLIP_TYPES = ["all", "text", "image", "link", "file", "apikey"] as const;
+export const CLIP_TYPES = ["all", "favorite", "text", "image", "link", "file", "apikey"] as const;
 export type ClipType = (typeof CLIP_TYPES)[number];
 
 interface ApiKeyLabel {
@@ -24,6 +24,7 @@ interface ClipboardRecord {
   created_at: string;
   is_api_key?: boolean;
   user_api_key?: boolean;
+  is_favorite: boolean;
   key_preview?: string;
   guessed_service?: string | null;
   label?: ApiKeyLabel | null;
@@ -47,6 +48,7 @@ interface ClipboardState {
   loadRecords: (append?: boolean) => Promise<void>;
   updateRecordLabel: (id: string, label: ApiKeyLabel) => void;
   deleteRecord: (id: string) => Promise<void>;
+  toggleFavorite: (id: string) => Promise<void>;
   pasteRecord: (record: ClipboardRecord) => Promise<void>;
   getRecordContent: (record: ClipboardRecord) => Promise<string>;
   getThumbnail: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
@@ -128,6 +130,20 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       }));
     });
 
+    listen<{ id: string; is_favorite: boolean }>("clipboard-favorite-changed", (event) => {
+      set((state) => ({
+        records: state.records.map((record) =>
+          record.id === event.payload.id
+            ? { ...record, is_favorite: event.payload.is_favorite }
+            : record,
+        ),
+      }));
+    });
+
+    listen("clipboard-refresh", () => {
+      get().loadRecords();
+    });
+
     get().loadRecords();
   },
 
@@ -188,6 +204,19 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     }
   },
 
+  toggleFavorite: async (id: string) => {
+    try {
+      const isFavorite = await invoke<boolean>("toggle_clipboard_favorite", { id });
+      set((state) => ({
+        records: state.records.map((record) =>
+          record.id === id ? { ...record, is_favorite: isFavorite } : record,
+        ),
+      }));
+    } catch (e) {
+      console.error("Failed to update favorite:", e);
+    }
+  },
+
   pasteRecord: async (record: ClipboardRecord) => {
     try {
       const content = await getFullContent(record);
@@ -217,7 +246,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         // Use base64 data URI for reliable cross-platform display
         const base64 = await invoke<string>("get_image_thumbnail", {
           path: record.content,
-          maxSize: 200,
+          maxSize: 360,
         });
         const url = `data:image/png;base64,${base64}`;
         set({ thumbnailCache: trimCache({ ...get().thumbnailCache, [record.id]: url }, MAX_THUMBNAILS) });

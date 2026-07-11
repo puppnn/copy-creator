@@ -1,5 +1,8 @@
 import { memo, useCallback, useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import StarBorderRoundedIcon from "@mui/icons-material/StarBorderRounded";
+import StarRoundedIcon from "@mui/icons-material/StarRounded";
+import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
 import { Icons } from "../../components/Icons";
 import { ImageThumb } from "./ImageThumb";
@@ -16,6 +19,7 @@ interface ClipboardCardProps {
   getTypeLabel: (type: string) => string;
   onPaste: (r: ClipboardRecord) => void;
   onDelete: (id: string) => void;
+  onToggleFavorite: (id: string) => void;
   onThumbHover: (thumbSrc: string, rect: DOMRect) => void;
   onThumbLeave: () => void;
 }
@@ -26,9 +30,11 @@ function ClipboardCardInner({
   getTypeLabel,
   onPaste,
   onDelete,
+  onToggleFavorite,
   onThumbHover,
   onThumbLeave,
 }: ClipboardCardProps) {
+  const { t } = useTranslation();
   const meta = TYPE_META[record.type] || TYPE_META.text;
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
@@ -76,6 +82,15 @@ function ClipboardCardInner({
       onDelete(record.id);
     },
     [onDelete, record.id],
+  );
+
+  const handleToggleFavorite = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setCtxMenu(null);
+      onToggleFavorite(record.id);
+    },
+    [onToggleFavorite, record.id],
   );
 
   const handleToggleText = useCallback(async (e: React.MouseEvent) => {
@@ -153,7 +168,7 @@ function ClipboardCardInner({
 
   return (
     <div
-      className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}`}
+      className={`notification clipboard-card type-${record.type}${record.is_favorite ? " is-favorite" : ""}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}`}
       style={{ "--color": meta.color, "--enter-delay": index } as React.CSSProperties}
       onClick={handlePaste}
       onContextMenu={handleContextMenu}
@@ -216,6 +231,15 @@ function ClipboardCardInner({
         <div className="notititle clipboard-card-footer">
           <span className="clipboard-card-time">{formatTime(record.created_at)}</span>
           <div className="clipboard-card-actions">
+            <button
+              className={`card-favorite-btn${record.is_favorite ? " active" : ""}`}
+              onClick={handleToggleFavorite}
+              type="button"
+              title={record.is_favorite ? t("clipboard.unfavorite") : t("clipboard.favorite")}
+              aria-label={record.is_favorite ? t("clipboard.unfavorite") : t("clipboard.favorite")}
+            >
+              {record.is_favorite ? <StarRoundedIcon /> : <StarBorderRoundedIcon />}
+            </button>
             {canToggleText && (
               <button
                 className="card-toggle-text-btn"
@@ -243,6 +267,11 @@ function ClipboardCardInner({
           style={{ top: ctxMenu.y, left: ctxMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
+          <button className="ctx-menu-item" onClick={handleToggleFavorite}>
+            {record.is_favorite ? <StarRoundedIcon /> : <StarBorderRoundedIcon />}
+            {record.is_favorite ? t("clipboard.unfavorite") : t("clipboard.favorite")}
+          </button>
+          <div className="ctx-menu-sep" />
           {record.is_api_key && (
             <button
               className="ctx-menu-item"
