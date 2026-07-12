@@ -59,7 +59,8 @@ let unlisten: UnlistenFn | null = null;
 
 const MAX_CONCURRENT = 3;
 const MAX_THUMBNAILS = 80;
-const MAX_FULL_IMAGES = 8;
+const MAX_FULL_IMAGES = 4;
+const FULL_IMAGE_PREVIEW_MAX_SIZE = 1600;
 let running = 0;
 const queue: (() => void)[] = [];
 
@@ -265,6 +266,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     try {
       const base64 = await invoke<string>("get_image_base64", {
         path: record.content,
+        maxSize: FULL_IMAGE_PREVIEW_MAX_SIZE,
       });
       const url = `data:image/png;base64,${base64}`;
       set({ imageCache: trimCache({ ...get().imageCache, [record.id]: url }, MAX_FULL_IMAGES) });

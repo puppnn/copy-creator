@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { useClipboardStore } from "../../stores/clipboardStore";
 import { Icons } from "../../components/Icons";
 import SearchInput from "../../components/SearchInput";
@@ -28,7 +29,22 @@ export default function ClipboardPage() {
     deleteRecord,
     toggleFavorite,
     pasteRecord,
-  } = useClipboardStore();
+  } = useClipboardStore(
+    useShallow((state) => ({
+      records: state.records,
+      search: state.search,
+      loading: state.loading,
+      hasMore: state.hasMore,
+      category: state.category,
+      init: state.init,
+      setSearch: state.setSearch,
+      setCategory: state.setCategory,
+      loadRecords: state.loadRecords,
+      deleteRecord: state.deleteRecord,
+      toggleFavorite: state.toggleFavorite,
+      pasteRecord: state.pasteRecord,
+    })),
+  );
 
   const [hoverPreview, setHoverPreview] = useState<{ src: string; x: number; y: number } | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -97,12 +113,12 @@ export default function ClipboardPage() {
 
   useEffect(() => {
     init();
-  }, []);
+  }, [init]);
 
   useEffect(() => {
     const timer = setTimeout(() => loadRecords(), 300);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [loadRecords, search]);
 
   const handleThumbHover = useCallback((thumbSrc: string, rect: DOMRect) => {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
