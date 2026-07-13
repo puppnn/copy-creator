@@ -103,7 +103,6 @@ pub fn run() {
             let is_autostart = std::env::args().any(|a| a == "--hidden");
 
             db::init_db(app.handle())?;
-            db::prune_old_records(app.handle()).ok();
             db::enforce_clipboard_limits(app.handle()).ok();
 
             // Repair autostart registry entry to ensure --hidden arg is present
@@ -114,20 +113,24 @@ pub fn run() {
 
             // Periodic pruning every hour
             let prune_handle = app.handle().clone();
-            std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(3600));
-                db::prune_old_records(&prune_handle).ok();
-            });
+            std::thread::Builder::new()
+                .name("clipboard-prune-worker".to_string())
+                .spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(3600));
+                    if let Err(error) = db::prune_old_records(&prune_handle) {
+                        log::warn!("periodic clipboard pruning failed: {error}");
+                    }
+                })?;
 
             app.handle().manage(tray::TrayState {
                 tray: std::sync::Mutex::new(None),
             });
             tray::create_tray(app.handle())?;
+            db::prune_old_records(app.handle()).ok();
 
             clipboard::start_monitor(app.handle())?;
 
             shortcut::install_mouse_hook(app.handle());
-            shortcut::install_keyboard_hook(app.handle());
 
             // Create hidden radial menu popup window
             {

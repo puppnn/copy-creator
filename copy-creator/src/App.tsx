@@ -30,14 +30,18 @@ function App() {
   const [unreadCount, setUnreadCount] = useState(0);
   const { themeMode, toggleTheme, loadSettings } = useSettingsStore();
   const [isPinned, setIsPinned] = useState(false);
+  const markReadInFlightRef = useRef<Promise<void> | null>(null);
 
-  const markClipboardRead = useCallback(async () => {
-    try {
-      await invoke("mark_clipboard_read");
-      setUnreadCount(0);
-    } catch (e) {
-      console.error("Failed to mark clipboard as read:", e);
-    }
+  const markClipboardRead = useCallback(() => {
+    if (markReadInFlightRef.current) return markReadInFlightRef.current;
+    const request = invoke<void>("mark_clipboard_read")
+      .then(() => setUnreadCount(0))
+      .catch((e) => console.error("Failed to mark clipboard as read:", e))
+      .finally(() => {
+        markReadInFlightRef.current = null;
+      });
+    markReadInFlightRef.current = request;
+    return request;
   }, []);
 
   useEffect(() => {
