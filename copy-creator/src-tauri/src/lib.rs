@@ -5,8 +5,11 @@ mod shortcut;
 mod translator;
 mod tray;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Manager;
 use tauri_plugin_autostart::ManagerExt;
+
+static MAIN_WINDOW_PINNED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "windows")]
 fn apply_backdrop_effect(window: &tauri::WebviewWindow) {
@@ -51,6 +54,47 @@ fn apply_backdrop_effect(window: &tauri::WebviewWindow) {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn cursor_is_inside_window(window: &tauri::WebviewWindow) -> bool {
+    use windows::Win32::Foundation::{HWND, POINT, RECT};
+    use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetWindowRect};
+
+    let Ok(raw_hwnd) = window.hwnd() else {
+        return true;
+    };
+    let hwnd = HWND(raw_hwnd.0);
+    if hwnd.is_invalid() {
+        return true;
+    }
+
+    let mut cursor = POINT::default();
+    let mut rect = RECT::default();
+    if unsafe { GetCursorPos(&mut cursor) }.is_err()
+        || unsafe { GetWindowRect(hwnd, &mut rect) }.is_err()
+    {
+        return true;
+    }
+
+    cursor.x >= rect.left && cursor.x < rect.right && cursor.y >= rect.top && cursor.y < rect.bottom
+}
+
+#[cfg(target_os = "windows")]
+fn install_auto_hide_on_focus_loss(window: &tauri::WebviewWindow) {
+    let event_window = window.clone();
+    window.on_window_event(move |event| {
+        if !matches!(event, tauri::WindowEvent::Focused(false))
+            || MAIN_WINDOW_PINNED.load(Ordering::SeqCst)
+            || cursor_is_inside_window(&event_window)
+        {
+            return;
+        }
+
+        if let Err(error) = event_window.hide() {
+            log::warn!("failed to hide unfocused main window: {error}");
+        }
+    });
+}
+
 #[tauri::command]
 fn toggle_always_on_top(app: tauri::AppHandle) -> Result<bool, String> {
     let window = app
@@ -59,6 +103,7 @@ fn toggle_always_on_top(app: tauri::AppHandle) -> Result<bool, String> {
     let current = window.is_always_on_top().map_err(|e| e.to_string())?;
     let next = !current;
     window.set_always_on_top(next).map_err(|e| e.to_string())?;
+    MAIN_WINDOW_PINNED.store(next, Ordering::SeqCst);
     Ok(next)
 }
 
@@ -96,6 +141,9 @@ pub fn run() {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
                     apply_backdrop_effect(&window);
+                    MAIN_WINDOW_PINNED
+                        .store(window.is_always_on_top().unwrap_or(false), Ordering::SeqCst);
+                    install_auto_hide_on_focus_loss(&window);
                     paste::init_foreground_tracker(&window);
                 }
             }
