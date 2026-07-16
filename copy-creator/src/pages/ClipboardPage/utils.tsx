@@ -18,5 +18,6 @@ export const TYPE_META: Record<string, { icon: React.ReactElement | null; color:
   text: { icon: null, color: "#007AFF" },
   image: { icon: null, color: "#34C759" },
   link: { icon: null, color: "#FF9500" },
+  explorer: { icon: null, color: "#00A6A6" },
   file: { icon: null, color: "#AF52DE" },
 };

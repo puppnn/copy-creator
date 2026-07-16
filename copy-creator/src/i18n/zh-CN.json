@@ -92,6 +92,7 @@
     "text": "文本",
     "image": "图片",
     "link": "链接",
+    "explorer": "资源管理器地址",
     "file": "文件",
     "apikey": "API Key",
     "favorites": "收藏",

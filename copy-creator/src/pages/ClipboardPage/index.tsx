@@ -1,17 +1,16 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
-import { useClipboardStore } from "../../stores/clipboardStore";
+import { useClipboardStore, type ClipType } from "../../stores/clipboardStore";
 import { Icons } from "../../components/Icons";
 import SearchInput from "../../components/SearchInput";
 import { ClipboardCard } from "./ClipboardCard";
 import { TYPE_META } from "./utils";
 
-type ClipType = "all" | "favorite" | "text" | "image" | "link" | "file" | "apikey";
-
 TYPE_META.text.icon = Icons.clipboard;
 TYPE_META.image.icon = Icons.image;
 TYPE_META.link.icon = Icons.link;
+TYPE_META.explorer.icon = Icons.file;
 TYPE_META.file.icon = Icons.file;
 
 export default function ClipboardPage() {
@@ -56,6 +55,7 @@ export default function ClipboardPage() {
     { key: "text", label: t("clipboard.text") },
     { key: "image", label: t("clipboard.image") },
     { key: "link", label: t("clipboard.link") },
+    { key: "explorer", label: t("clipboard.explorer") },
     { key: "file", label: t("clipboard.file") },
     { key: "apikey", label: t("clipboard.apikey") },
   ];
@@ -65,6 +65,7 @@ export default function ClipboardPage() {
       text: t("clipboard.text"),
       image: t("clipboard.image"),
       link: t("clipboard.link"),
+      explorer: t("clipboard.explorer"),
       file: t("clipboard.file"),
     }),
     [t],

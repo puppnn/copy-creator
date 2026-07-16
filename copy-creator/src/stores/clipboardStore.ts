@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 
 type UnlistenFn = () => void;
 
-export const CLIP_TYPES = ["all", "favorite", "text", "image", "link", "file", "apikey"] as const;
+export const CLIP_TYPES = ["all", "favorite", "text", "image", "link", "explorer", "file", "apikey"] as const;
 export type ClipType = (typeof CLIP_TYPES)[number];
 
 interface ApiKeyLabel {
@@ -16,7 +16,7 @@ interface ApiKeyLabel {
 
 interface ClipboardRecord {
   id: string;
-  type: "text" | "image" | "link" | "file";
+  type: "text" | "image" | "link" | "explorer" | "file";
   content: string;
   content_length?: number;
   content_truncated?: boolean;

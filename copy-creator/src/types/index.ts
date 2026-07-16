@@ -7,7 +7,7 @@ export interface ApiKeyLabel {
 
 export interface ClipboardRecord {
   id: string;
-  type: "text" | "image" | "link" | "file";
+  type: "text" | "image" | "link" | "explorer" | "file";
   content: string;
   content_length?: number;
   content_truncated?: boolean;

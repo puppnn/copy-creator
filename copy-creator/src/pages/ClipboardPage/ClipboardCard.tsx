@@ -219,6 +219,8 @@ function ClipboardCardInner({
             />
           ) : record.type === "link" ? (
             <span className="clipboard-link-content">{record.content}</span>
+          ) : record.type === "explorer" ? (
+            <span className="clipboard-explorer-content">{record.content}</span>
           ) : record.type === "file" ? (
             <span className="clipboard-file-content">{getFileName(record.content)}</span>
           ) : (

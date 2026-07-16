@@ -70,6 +70,10 @@
   --color: #FF9500;
 }
 
+.clipboard-card.type-explorer {
+  --color: #00A6A6;
+}
+
 .clipboard-card.type-file {
   --color: #AF52DE;
 }
@@ -191,6 +195,12 @@
   text-decoration-line: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
+}
+
+.clipboard-explorer-content {
+  color: var(--text-primary);
+  word-break: break-all;
+  font-size: var(--text-sm);
 }
 
 .clipboard-file-content {
