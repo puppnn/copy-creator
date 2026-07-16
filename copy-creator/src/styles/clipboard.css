@@ -4,6 +4,7 @@
   flex-direction: column;
   gap: 10px;
   height: 100%;
+  position: relative;
 }
 
 .clipboard-list {
@@ -31,6 +32,46 @@
 
 [data-theme="dark"] .clipboard-list::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.15);
+}
+
+.clipboard-scroll-top {
+  position: absolute;
+  right: 10px;
+  bottom: 12px;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--separator);
+  border-radius: 50%;
+  background: var(--card-inner-bg);
+  color: var(--text-primary);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  animation: fadeIn 0.15s ease;
+}
+
+.clipboard-scroll-top svg {
+  width: 22px;
+  height: 22px;
+}
+
+.clipboard-scroll-top:hover {
+  background: var(--chip-hover-bg);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.clipboard-scroll-top:active {
+  transform: scale(0.94);
+}
+
+.clipboard-scroll-top:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .clipboard-load-more {
@@ -90,26 +131,9 @@
 
 .clipboard-categories {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  overflow-x: auto;
   padding: 2px 0;
-}
-
-.clipboard-categories::-webkit-scrollbar {
-  height: 3px;
-}
-
-.clipboard-categories::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.clipboard-categories::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 2px;
-}
-
-[data-theme="dark"] .clipboard-categories::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
 }
 
 .category-chip {
