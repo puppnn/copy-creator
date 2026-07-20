@@ -208,6 +208,15 @@
   height: 14px;
 }
 
+.clipboard-link-content,
+.clipboard-explorer-content,
+.clipboard-file-content,
+.clipboard-text-content {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
 .clipboard-link-content {
   color: var(--accent);
   word-break: break-all;

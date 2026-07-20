@@ -12,6 +12,12 @@ import { useClipboardStore } from "../../stores/clipboardStore";
 
 const COLLAPSE_TEXT_LENGTH = 160;
 const COLLAPSE_LINE_COUNT = 4;
+const SELECTABLE_TEXT_TYPES = new Set<ClipboardRecord["type"]>([
+  "text",
+  "link",
+  "explorer",
+  "file",
+]);
 
 interface ClipboardCardProps {
   record: ClipboardRecord;
@@ -79,6 +85,22 @@ function ClipboardCardInner({
   const handleCardClick = useCallback(
     async (e: React.MouseEvent) => {
       if (labelOpen) return;
+
+      const selection = window.getSelection();
+      const hasSelectedCardText =
+        SELECTABLE_TEXT_TYPES.has(record.type) &&
+        selection !== null &&
+        !selection.isCollapsed &&
+        selection.toString().length > 0 &&
+        [selection.anchorNode, selection.focusNode].some(
+          (node) => node !== null && e.currentTarget.contains(node),
+        );
+
+      if (hasSelectedCardText) {
+        e.stopPropagation();
+        return;
+      }
+
       if (record.type !== "link" || !e.ctrlKey) {
         handlePaste();
         return;
