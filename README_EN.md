@@ -18,7 +18,7 @@ Clipboard Manager · Quick Phrases · Translation
 ![Platform](https://img.shields.io/badge/platform-Windows%2010+-brightgreen.svg)
 ![Tauri](https://img.shields.io/badge/Tauri-2.x-ffc131.svg)
 ![React](https://img.shields.io/badge/React-19-61dafb.svg)
-![Version](https://img.shields.io/badge/version-0.2.21-00a6a6.svg)
+![Version](https://img.shields.io/badge/version-0.2.22-00a6a6.svg)
 
 </div>
 
@@ -28,15 +28,16 @@ Clipboard Manager · Quick Phrases · Translation
 
 Copy Creator is a lightweight Windows desktop productivity tool that appears as a floating window and minimizes to the system tray when closed. It integrates three core features: clipboard history management, quick phrases, and translation, helping users improve text processing efficiency in their daily work.
 
-This repository is a fork of [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator). It keeps the original features, selectively incorporates useful OneClip capabilities, and adds continued Windows-specific improvements for clipboard interaction, paste focus, image previews, and window stability. The current customized release is **v0.2.21**.
+This repository is a fork of [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator). It keeps the original features, selectively incorporates useful OneClip capabilities, and adds continued Windows-specific improvements for clipboard interaction, paste focus, image previews, and window stability. The current customized release is **v0.2.22**.
 
-## Improvements in This Fork (v0.2.21)
+## Improvements in This Fork (v0.2.22)
 
 Compared with the upstream baseline, this fork includes substantial extensions to clipboard handling, image processing, window interaction, and data management. See the complete code comparison on [GitHub Compare](https://github.com/puppnn/copy-creator/compare/5b415599e82b61b13e034016ca3c287cdbd1a418...main).
 
 ### Clipboard Organization and Actions
 
 - Added favorites and a dedicated Favorites category; automatic retention and capacity cleanup preserve favorite records first
+- Favorite entries support adding, editing, and clearing notes; search and data import/export preserve those notes
 - Added an Explorer Address category for Windows drive paths, UNC network paths, and selected Shell addresses, including migration of existing address records
 - Text, links, Explorer addresses, and file paths can all be selected with the mouse; selecting text does not accidentally paste the entire record
 - Hold `Ctrl` and click a supported link to open it in the default browser, with underline and pointer feedback while Ctrl is held
