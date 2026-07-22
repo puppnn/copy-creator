@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
+import KeyboardArrowUpRoundedIcon from "@mui/icons-material/KeyboardArrowUpRounded";
 import { useClipboardStore, type ClipType } from "../../stores/clipboardStore";
 import { Icons } from "../../components/Icons";
 import SearchInput from "../../components/SearchInput";
@@ -12,6 +13,8 @@ TYPE_META.image.icon = Icons.image;
 TYPE_META.link.icon = Icons.link;
 TYPE_META.explorer.icon = Icons.file;
 TYPE_META.file.icon = Icons.file;
+
+const SCROLL_TOP_BUTTON_THRESHOLD = 180;
 
 export default function ClipboardPage() {
   const { t } = useTranslation();
@@ -46,6 +49,8 @@ export default function ClipboardPage() {
   );
 
   const pageRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const [hoverPreview, setHoverPreview] = useState<{ src: string; x: number; y: number } | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -105,6 +110,19 @@ export default function ClipboardPage() {
     },
     [setCategory, loadRecords],
   );
+
+  const handleListRef = useCallback((list: HTMLDivElement | null) => {
+    listRef.current = list;
+    setShowScrollTop(Boolean(list && list.scrollTop > SCROLL_TOP_BUTTON_THRESHOLD));
+  }, []);
+
+  const handleListScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    setShowScrollTop(event.currentTarget.scrollTop > SCROLL_TOP_BUTTON_THRESHOLD);
+  }, []);
+
+  const handleScrollToTop = useCallback(() => {
+    listRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
 
   const filtered = useMemo(() => {
     if (category === "all") return records;
@@ -210,7 +228,11 @@ export default function ClipboardPage() {
           <span>{t("clipboard.empty")}</span>
         </div>
       ) : (
-        <div className="clipboard-list">
+        <div
+          ref={handleListRef}
+          className="clipboard-list"
+          onScroll={handleListScroll}
+        >
           {filtered.map((r, i) => (
             <ClipboardCard
               key={r.id}
@@ -234,6 +256,18 @@ export default function ClipboardPage() {
             </button>
           )}
         </div>
+      )}
+
+      {showScrollTop && filtered.length > 0 && (
+        <button
+          className="clipboard-scroll-top"
+          type="button"
+          title={t("clipboard.scrollToTop")}
+          aria-label={t("clipboard.scrollToTop")}
+          onClick={handleScrollToTop}
+        >
+          <KeyboardArrowUpRoundedIcon />
+        </button>
       )}
 
       {hoverPreview && (

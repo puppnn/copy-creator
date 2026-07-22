@@ -100,7 +100,8 @@
     "unfavorite": "取消收藏",
     "apiKeyNote": "备注",
     "apiKeyNotePlaceholder": "备注（最多10字）",
-    "apiKeySaving": "保存中..."
+    "apiKeySaving": "保存中...",
+    "scrollToTop": "回到顶部"
   },
   "phrases": {
     "search": "搜索短语...",

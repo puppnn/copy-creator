@@ -100,7 +100,8 @@
     "unfavorite": "Remove Favorite",
     "apiKeyNote": "Note",
     "apiKeyNotePlaceholder": "Note (max 10 chars)",
-    "apiKeySaving": "Saving..."
+    "apiKeySaving": "Saving...",
+    "scrollToTop": "Back to top"
   },
   "phrases": {
     "search": "Search phrases...",
