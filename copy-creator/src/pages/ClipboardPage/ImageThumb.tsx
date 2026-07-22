@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useClipboardStore } from "../../stores/clipboardStore";
 
-const HOVER_PREVIEW_DELAY_MS = 500;
+const HOVER_PREVIEW_DELAY_MS = 300;
 
 interface ImageThumbProps {
   record: { id: string; content: string };
