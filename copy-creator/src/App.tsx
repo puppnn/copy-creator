@@ -30,6 +30,7 @@ function App() {
   const [unreadCount, setUnreadCount] = useState(0);
   const { themeMode, toggleTheme, loadSettings } = useSettingsStore();
   const [isPinned, setIsPinned] = useState(false);
+  const isPinnedRef = useRef(false);
   const markReadInFlightRef = useRef<Promise<void> | null>(null);
 
   const markClipboardRead = useCallback(() => {
@@ -72,7 +73,15 @@ function App() {
 
     const currentWindow = getCurrentWindow();
     currentWindow.onFocusChanged(({ payload: focused }) => {
-      if (focused && activePanel === "clipboard") markClipboardRead();
+      if (focused) {
+        if (activePanel === "clipboard") markClipboardRead();
+        return;
+      }
+      if (!isPinnedRef.current) {
+        void currentWindow.hide().catch((error) => {
+          console.error("Failed to hide unfocused window:", error);
+        });
+      }
     }).then((unlisten) => {
       if (disposed) unlisten();
       else cleanup.push(unlisten);
@@ -173,6 +182,7 @@ function App() {
   const handleTogglePin = async () => {
     try {
       const next = await invoke<boolean>("toggle_always_on_top");
+      isPinnedRef.current = next;
       setIsPinned(next);
     } catch (e) {
       console.error("Failed to toggle pin:", e);
