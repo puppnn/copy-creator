@@ -186,6 +186,13 @@
   font-size: var(--text-sm);
 }
 
+.clipboard-page.is-ctrl-pressed .clipboard-link-content:hover {
+  cursor: pointer;
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
 .clipboard-file-content {
   color: var(--text-primary);
   font-size: var(--text-sm);

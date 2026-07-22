@@ -46,6 +46,7 @@ export default function ClipboardPage() {
     })),
   );
 
+  const pageRef = useRef<HTMLDivElement>(null);
   const [hoverPreview, setHoverPreview] = useState<{ src: string; x: number; y: number } | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -120,6 +121,38 @@ export default function ClipboardPage() {
     return () => clearTimeout(timer);
   }, [loadRecords, search]);
 
+  useEffect(() => {
+    const page = pageRef.current;
+    if (!page) return;
+
+    let ctrlPressed = false;
+    const setCtrlPressed = (pressed: boolean) => {
+      if (ctrlPressed === pressed) return;
+      ctrlPressed = pressed;
+      page.classList.toggle("is-ctrl-pressed", pressed);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Control" || event.ctrlKey) setCtrlPressed(true);
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key === "Control" || !event.ctrlKey) setCtrlPressed(false);
+    };
+    const handlePointerMove = (event: PointerEvent) => setCtrlPressed(event.ctrlKey);
+    const clearCtrlPressed = () => setCtrlPressed(false);
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", clearCtrlPressed);
+    page.addEventListener("pointermove", handlePointerMove);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", clearCtrlPressed);
+      page.removeEventListener("pointermove", handlePointerMove);
+      page.classList.remove("is-ctrl-pressed");
+    };
+  }, []);
+
   const handleThumbHover = useCallback((thumbSrc: string, rect: DOMRect) => {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
     setHoverPreview({ src: thumbSrc, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
@@ -130,7 +163,7 @@ export default function ClipboardPage() {
   }, []);
 
   return (
-    <div className="clipboard-page">
+    <div ref={pageRef} className="clipboard-page">
       <div className="page-search">
         <SearchInput
           placeholder={t("clipboard.search")}
