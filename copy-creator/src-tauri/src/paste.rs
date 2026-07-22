@@ -9,6 +9,9 @@ pub static PASTING: AtomicBool = AtomicBool::new(false);
 static LAST_FOREGROUND_HWND: AtomicPtr<core::ffi::c_void> = AtomicPtr::new(ptr::null_mut());
 
 #[cfg(target_os = "windows")]
+static LAST_FOCUS_HWND: AtomicPtr<core::ffi::c_void> = AtomicPtr::new(ptr::null_mut());
+
+#[cfg(target_os = "windows")]
 static OUR_HWND: AtomicPtr<core::ffi::c_void> = AtomicPtr::new(ptr::null_mut());
 
 #[cfg(target_os = "windows")]
@@ -21,13 +24,189 @@ pub fn register_radial_hwnd(window: &tauri::WebviewWindow) {
 }
 
 #[cfg(target_os = "windows")]
+fn remember_foreground_target(hwnd: windows::Win32::Foundation::HWND, thread_id: u32) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetGUIThreadInfo, GetWindowThreadProcessId, GUITHREADINFO,
+    };
+
+    if hwnd.is_invalid() {
+        return;
+    }
+
+    unsafe {
+        LAST_FOREGROUND_HWND.store(hwnd.0, Ordering::SeqCst);
+
+        let target_thread = if thread_id == 0 {
+            GetWindowThreadProcessId(hwnd, None)
+        } else {
+            thread_id
+        };
+        let mut info = GUITHREADINFO {
+            cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+            ..Default::default()
+        };
+        let focus = if target_thread != 0 && GetGUIThreadInfo(target_thread, &mut info).is_ok() {
+            if !info.hwndFocus.is_invalid() {
+                info.hwndFocus
+            } else if !info.hwndCaret.is_invalid() {
+                info.hwndCaret
+            } else {
+                HWND::default()
+            }
+        } else {
+            HWND::default()
+        };
+        LAST_FOCUS_HWND.store(focus.0, Ordering::SeqCst);
+
+        log::debug!(
+            "[paste] saved foreground=0x{:x}, focus=0x{:x}, thread={}",
+            hwnd.0 as usize,
+            focus.0 as usize,
+            target_thread
+        );
+    }
+}
+
+#[cfg(target_os = "windows")]
 pub fn save_foreground_window() {
-    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+
     unsafe {
         let hwnd = GetForegroundWindow();
-        if !hwnd.is_invalid() {
-            LAST_FOREGROUND_HWND.store(hwnd.0, Ordering::SeqCst);
+        let our = OUR_HWND.load(Ordering::SeqCst);
+        let radial = RADIAL_HWND.load(Ordering::SeqCst);
+        if !hwnd.is_invalid() && hwnd.0 != our && hwnd.0 != radial {
+            remember_foreground_target(hwnd, GetWindowThreadProcessId(hwnd, None));
         }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn saved_target_has_focus() -> bool {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, IsChild, IsWindow,
+        GUITHREADINFO,
+    };
+
+    unsafe {
+        let target = HWND(LAST_FOREGROUND_HWND.load(Ordering::SeqCst));
+        if target.is_invalid() || !IsWindow(target).as_bool() || GetForegroundWindow() != target {
+            return false;
+        }
+
+        let saved_focus = HWND(LAST_FOCUS_HWND.load(Ordering::SeqCst));
+        if saved_focus.is_invalid() || !IsWindow(saved_focus).as_bool() {
+            return true;
+        }
+
+        let focus_thread = GetWindowThreadProcessId(saved_focus, None);
+        if focus_thread == 0 {
+            return false;
+        }
+        let mut info = GUITHREADINFO {
+            cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+            ..Default::default()
+        };
+        if GetGUIThreadInfo(focus_thread, &mut info).is_err() {
+            return false;
+        }
+
+        let current_focus = if !info.hwndFocus.is_invalid() {
+            info.hwndFocus
+        } else {
+            info.hwndCaret
+        };
+        if current_focus.is_invalid() {
+            return false;
+        }
+        current_focus == saved_focus
+            || IsChild(saved_focus, current_focus).as_bool()
+            || IsChild(current_focus, saved_focus).as_bool()
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn restore_foreground_target() -> bool {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowThreadProcessId, IsWindow, PeekMessageW, SetForegroundWindow, MSG, PM_NOREMOVE,
+    };
+
+    unsafe {
+        let target = HWND(LAST_FOREGROUND_HWND.load(Ordering::SeqCst));
+        if target.is_invalid() || !IsWindow(target).as_bool() {
+            return false;
+        }
+
+        let saved_focus = HWND(LAST_FOCUS_HWND.load(Ordering::SeqCst));
+        let focus_valid = !saved_focus.is_invalid() && IsWindow(saved_focus).as_bool();
+        let current_thread = GetCurrentThreadId();
+        let target_thread = GetWindowThreadProcessId(target, None);
+        let focus_thread = if focus_valid {
+            GetWindowThreadProcessId(saved_focus, None)
+        } else {
+            0
+        };
+
+        // AttachThreadInput requires the caller to own a message queue.
+        let mut message = MSG::default();
+        let _ = PeekMessageW(&mut message, HWND::default(), 0, 0, PM_NOREMOVE);
+
+        let attached_target = target_thread != 0
+            && target_thread != current_thread
+            && AttachThreadInput(current_thread, target_thread, true).as_bool();
+        let attached_focus = focus_thread != 0
+            && focus_thread != current_thread
+            && focus_thread != target_thread
+            && AttachThreadInput(current_thread, focus_thread, true).as_bool();
+
+        let foreground_set = SetForegroundWindow(target).as_bool();
+        if focus_valid {
+            let _ = SetFocus(saved_focus);
+        }
+        let ready = saved_target_has_focus();
+
+        if attached_focus {
+            let _ = AttachThreadInput(current_thread, focus_thread, false);
+        }
+        if attached_target {
+            let _ = AttachThreadInput(current_thread, target_thread, false);
+        }
+
+        log::debug!(
+            "[paste] restore foreground=0x{:x}, focus=0x{:x}, set={}, ready={}",
+            target.0 as usize,
+            saved_focus.0 as usize,
+            foreground_set,
+            ready
+        );
+        ready || (foreground_set && !focus_valid)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn restore_foreground_target_and_wait() -> bool {
+    let _ = restore_foreground_target();
+    let start = std::time::Instant::now();
+    let timeout = Duration::from_millis(180);
+    let mut retried = false;
+
+    loop {
+        if saved_target_has_focus() {
+            return true;
+        }
+        if !retried && start.elapsed() >= Duration::from_millis(60) {
+            let _ = restore_foreground_target();
+            retried = true;
+        }
+        if start.elapsed() >= timeout {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(10));
     }
 }
 
@@ -61,13 +240,13 @@ unsafe extern "system" fn foreground_change_hook(
     hwnd: windows::Win32::Foundation::HWND,
     _id_object: i32,
     _id_child: i32,
-    _event_thread: u32,
+    event_thread: u32,
     _event_time: u32,
 ) {
     let our = OUR_HWND.load(Ordering::SeqCst);
     let radial = RADIAL_HWND.load(Ordering::SeqCst);
-    if hwnd.0 != our && hwnd.0 != radial && !hwnd.is_invalid() {
-        LAST_FOREGROUND_HWND.store(hwnd.0, Ordering::SeqCst);
+    if !PASTING.load(Ordering::SeqCst) && hwnd.0 != our && hwnd.0 != radial && !hwnd.is_invalid() {
+        remember_foreground_target(hwnd, event_thread);
     }
 }
 
@@ -189,34 +368,8 @@ fn paste_with_defocus(app: &AppHandle) -> Result<(), String> {
 
     let window = app.get_webview_window("main").ok_or("no window")?;
 
-    let is_pinned = window.is_always_on_top().unwrap_or(false);
-    if is_pinned {
-        // When pinned: switch focus without hiding to avoid flicker
-        #[cfg(target_os = "windows")]
-        {
-            use windows::Win32::Foundation::HWND;
-            use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
-            let last_hwnd = LAST_FOREGROUND_HWND.load(Ordering::SeqCst);
-            if !last_hwnd.is_null() {
-                unsafe {
-                    let _ = SetForegroundWindow(HWND(last_hwnd));
-                }
-            }
-        }
-    } else {
+    if !window.is_always_on_top().unwrap_or(false) {
         window.hide().map_err(|e| e.to_string())?;
-
-        #[cfg(target_os = "windows")]
-        {
-            use windows::Win32::Foundation::HWND;
-            use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
-            let last_hwnd = LAST_FOREGROUND_HWND.load(Ordering::SeqCst);
-            if !last_hwnd.is_null() {
-                unsafe {
-                    let _ = SetForegroundWindow(HWND(last_hwnd));
-                }
-            }
-        }
     }
 
     // Wait for modifiers from the popup gestures to be released before sending Ctrl+V.
@@ -242,8 +395,11 @@ fn paste_with_defocus(app: &AppHandle) -> Result<(), String> {
             }
             thread::sleep(Duration::from_millis(10));
         }
-        // Small extra settle time for foreground window
-        thread::sleep(Duration::from_millis(30));
+        let restored = restore_foreground_target_and_wait();
+        if !restored {
+            log::warn!("[paste] target focus was not confirmed before Ctrl+V");
+        }
+        thread::sleep(Duration::from_millis(10));
     }
 
     #[cfg(not(target_os = "windows"))]
