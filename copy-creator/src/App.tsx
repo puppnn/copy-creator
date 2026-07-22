@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import ClipboardPage from "./pages/ClipboardPage";
@@ -30,7 +30,6 @@ function App() {
   const [unreadCount, setUnreadCount] = useState(0);
   const { themeMode, toggleTheme, loadSettings } = useSettingsStore();
   const [isPinned, setIsPinned] = useState(false);
-  const isPinnedRef = useRef(false);
   const markReadInFlightRef = useRef<Promise<void> | null>(null);
 
   const markClipboardRead = useCallback(() => {
@@ -72,33 +71,8 @@ function App() {
     });
 
     const currentWindow = getCurrentWindow();
-    const hideIfFocusMovedOutside = async () => {
-      if (isPinnedRef.current) return;
-      try {
-        const [focused, windowPosition, windowSize, cursor] = await Promise.all([
-          currentWindow.isFocused(),
-          currentWindow.outerPosition(),
-          currentWindow.outerSize(),
-          cursorPosition(),
-        ]);
-        if (isPinnedRef.current || focused) return;
-
-        const cursorInsideWindow =
-          cursor.x >= windowPosition.x &&
-          cursor.x < windowPosition.x + windowSize.width &&
-          cursor.y >= windowPosition.y &&
-          cursor.y < windowPosition.y + windowSize.height;
-        if (!cursorInsideWindow) await currentWindow.hide();
-      } catch (error) {
-        console.error("Failed to handle unfocused window:", error);
-      }
-    };
     currentWindow.onFocusChanged(({ payload: focused }) => {
-      if (focused) {
-        if (activePanel === "clipboard") markClipboardRead();
-        return;
-      }
-      void hideIfFocusMovedOutside();
+      if (focused && activePanel === "clipboard") markClipboardRead();
     }).then((unlisten) => {
       if (disposed) unlisten();
       else cleanup.push(unlisten);
@@ -199,7 +173,6 @@ function App() {
   const handleTogglePin = async () => {
     try {
       const next = await invoke<boolean>("toggle_always_on_top");
-      isPinnedRef.current = next;
       setIsPinned(next);
     } catch (e) {
       console.error("Failed to toggle pin:", e);
