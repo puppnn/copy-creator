@@ -41,6 +41,17 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const unlisten = listen("show-clipboard", () => {
+      setActivePanel("clipboard");
+      void markClipboardRead();
+    });
+
+    return () => {
+      void unlisten.then((dispose) => dispose());
+    };
+  }, [markClipboardRead]);
+
+  useEffect(() => {
     let disposed = false;
     const cleanup: Array<() => void> = [];
     invoke<number>("get_clipboard_unread_count")
@@ -83,7 +94,7 @@ function App() {
         i18n.changeLanguage(lang);
       }
     });
-  }, []);
+  }, [loadSettings]);
 
   const SIDEBAR_MIN = 60;
   const SIDEBAR_MAX = 130;
