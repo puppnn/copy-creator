@@ -1,9 +1,19 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { useSettingsStore } from "../stores/settingsStore";
-import { StorageSection, LanguageSection, ShortcutSection, TranslationSection, StartupSection } from "./settings";
+import {
+  StorageSection,
+  ClipboardSection,
+  ImageSection,
+  DataSection,
+  LanguageSection,
+  ShortcutSection,
+  TranslationSection,
+  StartupSection,
+} from "./settings";
+import type { ClipboardStorageStats } from "./settings";
 
 interface Props {
   embedded?: boolean;
@@ -24,15 +34,33 @@ export default function SettingsContent({ embedded }: Props) {
   const [localShortcutKey, setLocalShortcutKey] = useState(settings.shortcutKey);
   const [localRadialMenuEnabled, setLocalRadialMenuEnabled] = useState(settings.radialMenuEnabled);
   const [localAutostart, setLocalAutostart] = useState(settings.autostartEnabled);
+  const [localMaxHistoryItems, setLocalMaxHistoryItems] = useState(settings.maxHistoryItems);
+  const [localMaxStorageMb, setLocalMaxStorageMb] = useState(settings.maxStorageMb);
+  const [localImageMaxDimension, setLocalImageMaxDimension] = useState(settings.imageMaxDimension);
+  const [localImageCompressionQuality, setLocalImageCompressionQuality] = useState(settings.imageCompressionQuality);
+  const [localLargeImageHandling, setLocalLargeImageHandling] = useState(settings.largeImageHandling);
+  const [localClipboardNotifications, setLocalClipboardNotifications] = useState(settings.clipboardNotifications);
+  const [storageStats, setStorageStats] = useState<ClipboardStorageStats | null>(null);
   const [recording, setRecording] = useState(false);
   const recordingRef = useRef(false);
   const keydownHandlerRef = useRef<((e: KeyboardEvent) => void) | null>(null);
   const [storagePath, setStoragePath] = useState("");
   const [saved, setSaved] = useState(false);
 
+  const loadStorageStats = useCallback(async () => {
+    try {
+      setStorageStats(await invoke<ClipboardStorageStats>("get_clipboard_storage_stats"));
+    } catch (e) {
+      console.error("Failed to load clipboard storage stats:", e);
+    }
+  }, []);
+
   useEffect(() => {
     settings.loadSettings();
     invoke<string>("get_storage_path").then(setStoragePath).catch(console.error);
+    invoke<ClipboardStorageStats>("get_clipboard_storage_stats")
+      .then(setStorageStats)
+      .catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -47,6 +75,12 @@ export default function SettingsContent({ embedded }: Props) {
     setLocalShortcutKey(settings.shortcutKey);
     setLocalRadialMenuEnabled(settings.radialMenuEnabled);
     setLocalAutostart(settings.autostartEnabled);
+    setLocalMaxHistoryItems(settings.maxHistoryItems);
+    setLocalMaxStorageMb(settings.maxStorageMb);
+    setLocalImageMaxDimension(settings.imageMaxDimension);
+    setLocalImageCompressionQuality(settings.imageCompressionQuality);
+    setLocalLargeImageHandling(settings.largeImageHandling);
+    setLocalClipboardNotifications(settings.clipboardNotifications);
   }, [settings, i18n.language]);
 
   const startRecording = () => {
@@ -120,6 +154,11 @@ export default function SettingsContent({ embedded }: Props) {
   };
 
   const handleSave = async () => {
+    const maxHistoryItems = Math.min(100000, Math.max(100, Math.round(localMaxHistoryItems || 2000)));
+    const maxStorageMb = Math.min(100000, Math.max(50, Math.round(localMaxStorageMb || 500)));
+    setLocalMaxHistoryItems(maxHistoryItems);
+    setLocalMaxStorageMb(maxStorageMb);
+
     await settings.setSettingsBatch({
       clipboard_retention: localRetention,
       default_translate_engine: localEngine,
@@ -129,6 +168,12 @@ export default function SettingsContent({ embedded }: Props) {
       google_api_key: localGoogleApiKey,
       translate_proxy: localTranslateProxy,
       language: localLang,
+      max_history_items: String(maxHistoryItems),
+      max_storage_mb: String(maxStorageMb),
+      image_max_dimension: String(localImageMaxDimension),
+      image_compression_quality: String(localImageCompressionQuality),
+      large_image_handling: localLargeImageHandling,
+      clipboard_notifications: localClipboardNotifications ? "1" : "0",
     });
 
     const oldKey = settings.shortcutKey;
@@ -149,6 +194,7 @@ export default function SettingsContent({ embedded }: Props) {
     }
 
     await settings.setAutostart(localAutostart);
+    await loadStorageStats();
 
     if (localLang !== i18n.language) {
       i18n.changeLanguage(localLang);
@@ -156,8 +202,30 @@ export default function SettingsContent({ embedded }: Props) {
       invoke("update_tray_language").catch(console.error);
     }
 
+    await settings.loadSettings();
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const handleImported = async () => {
+    const previousShortcut = settings.shortcutKey;
+    await settings.loadSettings();
+    const imported = useSettingsStore.getState();
+    if (previousShortcut !== imported.shortcutKey) {
+      await invoke("update_shortcut", {
+        oldShortcut: previousShortcut,
+        newShortcut: imported.shortcutKey,
+      }).catch(console.error);
+    }
+    await invoke("set_radial_menu_enabled", {
+      enabled: imported.radialMenuEnabled,
+    }).catch(console.error);
+    if (imported.language !== i18n.language) {
+      await i18n.changeLanguage(imported.language);
+      emit("language-changed", { language: imported.language });
+      invoke("update_tray_language").catch(console.error);
+    }
+    await loadStorageStats();
   };
 
   const content = (
@@ -167,6 +235,25 @@ export default function SettingsContent({ embedded }: Props) {
         setStoragePath={setStoragePath}
         localRetention={localRetention}
         setLocalRetention={setLocalRetention}
+      />
+
+      <ClipboardSection
+        maxHistoryItems={localMaxHistoryItems}
+        setMaxHistoryItems={setLocalMaxHistoryItems}
+        maxStorageMb={localMaxStorageMb}
+        setMaxStorageMb={setLocalMaxStorageMb}
+        notifications={localClipboardNotifications}
+        setNotifications={setLocalClipboardNotifications}
+        stats={storageStats}
+      />
+
+      <ImageSection
+        maxDimension={localImageMaxDimension}
+        setMaxDimension={setLocalImageMaxDimension}
+        compressionQuality={localImageCompressionQuality}
+        setCompressionQuality={setLocalImageCompressionQuality}
+        largeImageHandling={localLargeImageHandling}
+        setLargeImageHandling={setLocalLargeImageHandling}
       />
 
       <LanguageSection
@@ -188,6 +275,8 @@ export default function SettingsContent({ embedded }: Props) {
         localAutostart={localAutostart}
         setLocalAutostart={setLocalAutostart}
       />
+
+      <DataSection onImported={handleImported} />
 
       <TranslationSection
         localEngine={localEngine}

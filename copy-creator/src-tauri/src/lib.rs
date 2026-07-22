@@ -11,7 +11,9 @@ use tauri_plugin_autostart::ManagerExt;
 #[cfg(target_os = "windows")]
 fn apply_backdrop_effect(window: &tauri::WebviewWindow) {
     use windows::Win32::Foundation::HWND;
-    use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_WINDOW_CORNER_PREFERENCE};
+    use windows::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_WINDOW_CORNER_PREFERENCE,
+    };
 
     let hwnd = window.hwnd().unwrap_or_default();
     if hwnd.is_invalid() {
@@ -65,7 +67,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--hidden"]),
+        ))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -98,9 +104,7 @@ pub fn run() {
 
             db::init_db(app.handle())?;
             db::prune_old_records(app.handle()).ok();
-
-            // Always start with light theme
-            let _ = db::set_setting(app.handle().clone(), "theme".to_string(), "light".to_string());
+            db::enforce_clipboard_limits(app.handle()).ok();
 
             // Repair autostart registry entry to ensure --hidden arg is present
             let autostart = app.autolaunch();
@@ -115,17 +119,19 @@ pub fn run() {
                 db::prune_old_records(&prune_handle).ok();
             });
 
-            clipboard::start_monitor(app.handle())?;
-
-            app.handle().manage(tray::TrayState { tray: std::sync::Mutex::new(None) });
+            app.handle().manage(tray::TrayState {
+                tray: std::sync::Mutex::new(None),
+            });
             tray::create_tray(app.handle())?;
+
+            clipboard::start_monitor(app.handle())?;
 
             shortcut::install_mouse_hook(app.handle());
 
             // Create hidden radial menu popup window
             {
-                use tauri::WebviewWindowBuilder;
                 use tauri::WebviewUrl;
+                use tauri::WebviewWindowBuilder;
                 let radial = WebviewWindowBuilder::new(
                     app,
                     "radial-menu",
@@ -171,6 +177,10 @@ pub fn run() {
             db::get_clipboard_records,
             db::get_clipboard_record_content,
             db::delete_clipboard_record,
+            db::toggle_clipboard_favorite,
+            db::get_clipboard_storage_stats,
+            db::get_clipboard_unread_count,
+            db::mark_clipboard_read,
             db::get_phrase_groups,
             db::create_phrase_group,
             db::update_phrase_group,
@@ -185,6 +195,11 @@ pub fn run() {
             db::get_all_settings,
             db::set_setting,
             db::set_settings_batch,
+            db::export_user_data,
+            db::import_user_data,
+            paste::copy_text,
+            paste::copy_image,
+            paste::copy_file,
             paste::paste_text,
             paste::paste_image,
             paste::paste_file,

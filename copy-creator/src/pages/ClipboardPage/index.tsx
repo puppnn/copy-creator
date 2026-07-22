@@ -6,7 +6,7 @@ import SearchInput from "../../components/SearchInput";
 import { ClipboardCard } from "./ClipboardCard";
 import { TYPE_META } from "./utils";
 
-type ClipType = "all" | "text" | "image" | "link" | "file" | "apikey";
+type ClipType = "all" | "favorite" | "text" | "image" | "link" | "file" | "apikey";
 
 TYPE_META.text.icon = Icons.clipboard;
 TYPE_META.image.icon = Icons.image;
@@ -26,6 +26,7 @@ export default function ClipboardPage() {
     setCategory,
     loadRecords,
     deleteRecord,
+    toggleFavorite,
     pasteRecord,
   } = useClipboardStore();
 
@@ -34,6 +35,7 @@ export default function ClipboardPage() {
 
   const categories: { key: ClipType; label: string }[] = [
     { key: "all", label: t("clipboard.all") },
+    { key: "favorite", label: t("clipboard.favorites") },
     { key: "text", label: t("clipboard.text") },
     { key: "image", label: t("clipboard.image") },
     { key: "link", label: t("clipboard.link") },
@@ -66,6 +68,11 @@ export default function ClipboardPage() {
     [deleteRecord],
   );
 
+  const handleToggleFavorite = useCallback(
+    (id: string) => toggleFavorite(id),
+    [toggleFavorite],
+  );
+
   const handleSearchChange = useCallback(
     (value: string) => {
       setSearch(value);
@@ -83,6 +90,7 @@ export default function ClipboardPage() {
 
   const filtered = useMemo(() => {
     if (category === "all") return records;
+    if (category === "favorite") return records.filter((r) => r.is_favorite);
     if (category === "apikey") return records.filter((r) => r.is_api_key);
     return records.filter((r) => r.type === category);
   }, [records, category]);
@@ -161,6 +169,7 @@ export default function ClipboardPage() {
               getTypeLabel={getTypeLabel}
               onPaste={handlePaste}
               onDelete={handleDelete}
+              onToggleFavorite={handleToggleFavorite}
               onThumbHover={handleThumbHover}
               onThumbLeave={handleThumbLeave}
             />
