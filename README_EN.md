@@ -32,7 +32,7 @@ This repository is a fork of [hu-qi-jia/copy-creator](https://github.com/hu-qi-j
 
 ## Improvements in This Fork (v0.2.21)
 
-Compared with upstream `main`, the customized branch contains 15 additional commits across 28 files. See the complete code comparison on [GitHub Compare](https://github.com/puppnn/copy-creator/compare/main...codex/oneclip-selected-features).
+Compared with the upstream baseline, this fork includes substantial extensions to clipboard handling, image processing, window interaction, and data management. See the complete code comparison on [GitHub Compare](https://github.com/puppnn/copy-creator/compare/5b415599e82b61b13e034016ca3c287cdbd1a418...main).
 
 ### Clipboard Organization and Actions
 
@@ -180,7 +180,7 @@ Upstream installers remain available from [hu-qi-jia/copy-creator Releases](http
 
 ```bash
 # Clone the repository
-git clone --branch codex/oneclip-selected-features https://github.com/puppnn/copy-creator.git
+git clone https://github.com/puppnn/copy-creator.git
 cd copy-creator/copy-creator
 
 # Install dependencies

@@ -32,7 +32,7 @@ Copy Creator 是一款轻量级的 Windows 桌面效率工具，以悬浮窗形�
 
 ## 本 Fork 的改进（v0.2.21）
 
-相对上游 `main`，当前定制分支包含 15 个增量提交，涉及 28 个文件。可在 [GitHub Compare](https://github.com/puppnn/copy-creator/compare/main...codex/oneclip-selected-features) 查看完整代码差异。
+相对上游基线，本 Fork 对剪切板、图片处理、窗口交互和数据管理进行了系统扩展。可在 [GitHub Compare](https://github.com/puppnn/copy-creator/compare/5b415599e82b61b13e034016ca3c287cdbd1a418...main) 查看完整代码差异。
 
 ### 剪切板组织与操作
 
@@ -180,7 +180,7 @@ Copy Creator 是一款轻量级的 Windows 桌面效率工具，以悬浮窗形�
 
 ```bash
 # 克隆项目
-git clone --branch codex/oneclip-selected-features https://github.com/puppnn/copy-creator.git
+git clone https://github.com/puppnn/copy-creator.git
 cd copy-creator/copy-creator
 
 # 安装依赖
