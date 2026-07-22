@@ -25,6 +25,7 @@ interface ClipboardRecord {
   is_api_key?: boolean;
   user_api_key?: boolean;
   is_favorite: boolean;
+  favorite_note: string;
   key_preview?: string;
   guessed_service?: string | null;
   label?: ApiKeyLabel | null;
@@ -49,6 +50,7 @@ interface ClipboardState {
   updateRecordLabel: (id: string, label: ApiKeyLabel) => void;
   deleteRecord: (id: string) => Promise<void>;
   toggleFavorite: (id: string) => Promise<void>;
+  setFavoriteNote: (id: string, note: string) => Promise<string>;
   pasteRecord: (record: ClipboardRecord) => Promise<void>;
   getRecordContent: (record: ClipboardRecord) => Promise<string>;
   getThumbnail: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
@@ -141,6 +143,16 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       }));
     });
 
+    listen<{ id: string; favorite_note: string }>("clipboard-favorite-note-changed", (event) => {
+      set((state) => ({
+        records: state.records.map((record) =>
+          record.id === event.payload.id
+            ? { ...record, favorite_note: event.payload.favorite_note }
+            : record,
+        ),
+      }));
+    });
+
     listen("clipboard-refresh", () => {
       get().loadRecords();
     });
@@ -216,6 +228,16 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     } catch (e) {
       console.error("Failed to update favorite:", e);
     }
+  },
+
+  setFavoriteNote: async (id: string, note: string) => {
+    const favoriteNote = await invoke<string>("set_clipboard_favorite_note", { id, note });
+    set((state) => ({
+      records: state.records.map((record) =>
+        record.id === id ? { ...record, favorite_note: favoriteNote } : record,
+      ),
+    }));
+    return favoriteNote;
   },
 
   pasteRecord: async (record: ClipboardRecord) => {

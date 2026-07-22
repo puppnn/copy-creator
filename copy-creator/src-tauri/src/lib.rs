@@ -231,6 +231,7 @@ pub fn run() {
             clipboard::open_external_link,
             db::delete_clipboard_record,
             db::toggle_clipboard_favorite,
+            db::set_clipboard_favorite_note,
             db::get_clipboard_storage_stats,
             db::get_clipboard_unread_count,
             db::mark_clipboard_read,
