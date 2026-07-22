@@ -185,10 +185,14 @@ function App() {
         ref={sidebarRef}
         className={`sidebar ${isCollapsed ? "collapsed" : ""}`}
         style={{ width: sidebarWidth, minWidth: sidebarWidth }}
-        data-tauri-drag-region
       >
-        <div className="sidebar-header" data-tauri-drag-region>
-          <img className="sidebar-logo" src="/logo_top.png" alt="logo" />
+        <div className="sidebar-header">
+          <img
+            className="sidebar-logo"
+            src="/logo_top.png"
+            alt="logo"
+            draggable={false}
+          />
           <span className="sidebar-brand">{t("brand.name")}</span>
         </div>
 
@@ -263,11 +267,15 @@ function App() {
       </div>
 
       <div className="panel-area">
-        <div className="panel-window-header" data-tauri-drag-region>
-          <h3 className="panel-window-title" data-tauri-drag-region>
+        <div className="panel-window-header">
+          <h3 className="panel-window-title">
             {isSettingsPanel ? t("settings.title") : panelInfo ? t(panelInfo.titleKey) : ""}
           </h3>
-          <button className="window-close-btn" onClick={handleHide} title={t("common.hide")}>
+          <button
+            className="window-close-btn"
+            onClick={handleHide}
+            title={t("common.hide")}
+          >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />

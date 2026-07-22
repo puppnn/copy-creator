@@ -64,8 +64,6 @@
 
 [data-theme="dark"] .sidebar {
   background: var(--sidebar-bg);
-  backdrop-filter: blur(40px) saturate(180%);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
   border-right-color: var(--sidebar-border);
 }
 
@@ -98,13 +96,19 @@
 }
 
 /* --- Sidebar Header --- */
+/* Keep drag handling CSS-only: Tauri drag attributes start a second Windows drag. */
+.sidebar-header,
+.sidebar-logo,
+.sidebar-brand {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
 .sidebar-header {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 14px 8px 6px 18px;
-  -webkit-app-region: drag;
-  app-region: drag;
 }
 
 .sidebar-logo {
@@ -170,8 +174,6 @@
   white-space: nowrap;
   width: 100%;
   text-align: left;
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
 }
 
 .sidebar-nav-item:hover {
@@ -309,8 +311,6 @@
   white-space: nowrap;
   width: 100%;
   text-align: left;
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
 }
 
 .sidebar-footer-item:hover {
@@ -396,15 +396,11 @@
   flex-direction: column;
   overflow: hidden;
   background: var(--panel-bg);
-  backdrop-filter: blur(60px) saturate(180%);
-  -webkit-backdrop-filter: blur(60px) saturate(180%);
   color: var(--text-primary);
 }
 
 [data-theme="dark"] .panel-area {
   background: var(--panel-bg);
-  backdrop-filter: blur(60px) saturate(180%);
-  -webkit-backdrop-filter: blur(60px) saturate(180%);
   color: var(--text-primary);
 }
 
@@ -572,6 +568,12 @@
 }
 
 /* === Panel Window (inline panel content) === */
+.panel-window-header,
+.panel-window-title {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
 .panel-window-header {
   display: flex;
   align-items: center;
@@ -580,8 +582,6 @@
   border-bottom: 0.5px solid var(--separator);
   background: transparent;
   flex-shrink: 0;
-  -webkit-app-region: drag;
-  app-region: drag;
 }
 
 [data-theme="dark"] .panel-window-header {
