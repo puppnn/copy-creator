@@ -212,6 +212,8 @@
 .clipboard-explorer-content,
 .clipboard-file-content,
 .clipboard-text-content {
+  display: block;
+  width: 100%;
   user-select: text;
   -webkit-user-select: text;
   cursor: text;
