@@ -85,11 +85,7 @@ fn build_tray_menu(
     let mut builder = MenuBuilder::new(app);
 
     if unread_count > 0 {
-        let label = if lang == "en" {
-            format!("{unread_count} {unread_text}")
-        } else {
-            format!("{unread_count} {unread_text}")
-        };
+        let label = format!("{unread_count} {unread_text}");
         let unread = MenuItemBuilder::with_id("unread-count", label)
             .enabled(false)
             .build(app)?;

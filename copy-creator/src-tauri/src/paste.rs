@@ -312,10 +312,9 @@ use std::time::Duration;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
-fn load_image_for_clipboard(
-    app: &AppHandle,
-    path: &str,
-) -> Result<(Arc<Vec<u8>>, u32, u32, Arc<Vec<u8>>), String> {
+type ClipboardImageData = (Arc<Vec<u8>>, u32, u32, Arc<Vec<u8>>);
+
+fn load_image_for_clipboard(app: &AppHandle, path: &str) -> Result<ClipboardImageData, String> {
     {
         let cache = get_image_cache().lock().map_err(|e| e.to_string())?;
         if let Some(cached) = cache.map.get(path) {
@@ -524,13 +523,13 @@ fn write_image_to_clipboard(rgba: &[u8], w: u32, h: u32, png_bytes: &[u8]) -> Re
         bmi_header[0] = 40;
         bmi_header[1] = w;
         bmi_header[2] = (-(h as i32)) as u32;
-        *(((bmi as *mut u8).add(12)) as *mut u16) = 1;
-        *(((bmi as *mut u8).add(14)) as *mut u16) = 32;
-        *(((bmi as *mut u8).add(20)) as *mut u32) = w * h * 4;
+        *(bmi.add(12) as *mut u16) = 1;
+        *(bmi.add(14) as *mut u16) = 32;
+        *(bmi.add(20) as *mut u32) = w * h * 4;
 
         // Convert RGBA → BGRA (DIB expects BGRA pixel order)
         let pixel_offset = 40;
-        let dst = (bmi as *mut u8).add(pixel_offset);
+        let dst = bmi.add(pixel_offset);
         let src = rgba.as_ptr();
         for i in 0..(w * h) as usize {
             *dst.add(i * 4) = *src.add(i * 4 + 2); // B = R
