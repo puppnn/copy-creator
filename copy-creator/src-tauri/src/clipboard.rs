@@ -18,9 +18,47 @@ fn is_url(text: &str) -> bool {
     false
 }
 
+pub(crate) fn is_explorer_address(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed.chars().any(char::is_control) {
+        return false;
+    }
+
+    let candidate = trimmed
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .unwrap_or(trimmed);
+    let bytes = candidate.as_bytes();
+    let drive_absolute = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/');
+    let unc = candidate
+        .strip_prefix(r"\\")
+        .is_some_and(|rest| rest.split('\\').any(|part| !part.is_empty()));
+    let lower = candidate.to_ascii_lowercase();
+    let shell_address = lower
+        .strip_prefix("shell:")
+        .is_some_and(|rest| !rest.trim().is_empty());
+    let explorer_clsid =
+        candidate.starts_with("::{") && candidate.ends_with('}') && candidate.len() > 4;
+
+    drive_absolute || unc || shell_address || explorer_clsid
+}
+
+fn classify_text_record(text: &str) -> &'static str {
+    if is_url(text) {
+        "link"
+    } else if is_explorer_address(text) {
+        "explorer"
+    } else {
+        "text"
+    }
+}
+
 #[cfg(test)]
 mod url_tests {
-    use super::is_url;
+    use super::{classify_text_record, is_explorer_address, is_url};
 
     #[test]
     fn accepts_links_with_default_handlers() {
@@ -44,6 +82,48 @@ mod url_tests {
         ] {
             assert!(!is_url(value), "expected URL rejection: {value}");
         }
+    }
+
+    #[test]
+    fn recognizes_windows_explorer_addresses() {
+        for value in [
+            r"C:\Users\Public\Documents",
+            "D:/work/project",
+            r"\\server\share\folder",
+            r"\\?\C:\very-long-path",
+            "shell:Downloads",
+            "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}",
+            r#""C:\Program Files""#,
+        ] {
+            assert!(
+                is_explorer_address(value),
+                "expected an Explorer address: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_relative_or_non_explorer_text() {
+        for value in [
+            "C:relative-path",
+            r"folder\child",
+            r"\\",
+            "https://example.com/path",
+            "notes about C:\\Windows",
+            "C:\\Windows\nD:\\Data",
+        ] {
+            assert!(
+                !is_explorer_address(value),
+                "expected ordinary text: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn classifies_links_before_explorer_addresses() {
+        assert_eq!(classify_text_record("https://example.com"), "link");
+        assert_eq!(classify_text_record(r"C:\Users\Public"), "explorer");
+        assert_eq!(classify_text_record("plain text"), "text");
     }
 }
 
@@ -864,11 +944,11 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
                     let text = text.trim().to_string();
                     if !text.is_empty() && text != *LAST_CLIPBOARD_TEXT.lock().unwrap() {
                         *LAST_CLIPBOARD_TEXT.lock().unwrap() = text.clone();
-                        let record_type = if is_url(&text) { "link" } else { "text" };
+                        let record_type = classify_text_record(&text);
                         insert_and_emit(&handle, record_type, &text);
                     } else if !text.is_empty() {
                         // Same text re-copied (sequence changed, text matches cache)
-                        let record_type = if is_url(&text) { "link" } else { "text" };
+                        let record_type = classify_text_record(&text);
                         insert_and_emit(&handle, record_type, &text);
                     }
                 }

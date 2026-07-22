@@ -372,6 +372,7 @@ export default function RadialMenu() {
         { key: "text", label: t("clipboard.text") },
         { key: "image", label: t("clipboard.image") },
         { key: "link", label: t("clipboard.link") },
+        { key: "explorer", label: t("clipboard.explorer") },
         { key: "file", label: t("clipboard.file") },
         { key: "apikey", label: t("clipboard.apikey") },
       ]

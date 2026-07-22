@@ -92,6 +92,7 @@
     "text": "Text",
     "image": "Image",
     "link": "Link",
+    "explorer": "Explorer Path",
     "file": "File",
     "apikey": "API Key",
     "favorites": "Favorites",

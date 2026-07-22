@@ -53,6 +53,10 @@ fn category_sql(category: &Option<String>) -> (String, String) {
         Some("text") => ("WHERE type = 'text'".to_string(), "AND type = 'text'".to_string()),
         Some("image") => ("WHERE type = 'image'".to_string(), "AND type = 'image'".to_string()),
         Some("link") => ("WHERE type = 'link'".to_string(), "AND type = 'link'".to_string()),
+        Some("explorer") => (
+            "WHERE type = 'explorer'".to_string(),
+            "AND type = 'explorer'".to_string(),
+        ),
         Some("file") => ("WHERE type = 'file'".to_string(), "AND type = 'file'".to_string()),
         Some("favorite") => (
             "WHERE is_favorite = 1".to_string(),
@@ -448,7 +452,32 @@ fn migrate_clipboard_record_schema(conn: &Connection) -> rusqlite::Result<()> {
         "CREATE INDEX IF NOT EXISTS idx_clipboard_favorite_created_at ON clipboard_records(is_favorite, created_at)",
         [],
     )?;
+    let migrated = migrate_explorer_addresses(conn)?;
+    if migrated > 0 {
+        log::info!("reclassified {migrated} clipboard records as Explorer addresses");
+    }
     Ok(())
+}
+
+fn migrate_explorer_addresses(conn: &Connection) -> rusqlite::Result<usize> {
+    let candidates = {
+        let mut stmt =
+            conn.prepare("SELECT id, content FROM clipboard_records WHERE type = 'text'")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    let mut update =
+        conn.prepare("UPDATE clipboard_records SET type = 'explorer' WHERE id = ?1")?;
+    let mut migrated = 0;
+    for (id, content) in candidates {
+        if crate::clipboard::is_explorer_address(&content) {
+            migrated += update.execute(params![id])?;
+        }
+    }
+    Ok(migrated)
 }
 
 pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -2194,6 +2223,58 @@ mod tests {
 
         assert!(table_has_column(&conn, "clipboard_records", "user_api_key").unwrap());
         assert!(table_has_column(&conn, "clipboard_records", "is_favorite").unwrap());
+    }
+
+    #[test]
+    fn explorer_migration_reclassifies_only_absolute_addresses() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE clipboard_records (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                source_app TEXT DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            INSERT INTO clipboard_records (id, type, content, created_at) VALUES
+                ('drive', 'text', 'C:\Users\Public', '2026-07-11T00:00:00Z'),
+                ('unc', 'text', '\\server\share', '2026-07-11T00:01:00Z'),
+                ('relative', 'text', 'folder\child', '2026-07-11T00:02:00Z'),
+                ('link', 'link', 'https://example.com', '2026-07-11T00:03:00Z'),
+                ('file', 'file', 'C:\Users\Public\file.txt', '2026-07-11T00:04:00Z');
+            "#,
+        )
+        .unwrap();
+
+        migrate_clipboard_record_schema(&conn).unwrap();
+        migrate_clipboard_record_schema(&conn).unwrap();
+
+        let rows: Vec<(String, String)> = conn
+            .prepare("SELECT id, type FROM clipboard_records ORDER BY id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                ("drive".into(), "explorer".into()),
+                ("file".into(), "file".into()),
+                ("link".into(), "link".into()),
+                ("relative".into(), "text".into()),
+                ("unc".into(), "explorer".into()),
+            ]
+        );
+
+        assert_eq!(
+            category_sql(&Some("explorer".to_string())),
+            (
+                "WHERE type = 'explorer'".to_string(),
+                "AND type = 'explorer'".to_string(),
+            )
+        );
     }
 
     #[test]
