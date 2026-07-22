@@ -1610,13 +1610,23 @@ pub async fn import_user_data(app: AppHandle) -> Result<serde_json::Value, Strin
     }))
 }
 
-#[tauri::command]
-pub fn get_image_base64(app: AppHandle, path: String) -> Result<String, String> {
+#[tauri::command(async)]
+pub fn get_image_base64(
+    app: AppHandle,
+    path: String,
+    max_size: u32,
+) -> Result<String, String> {
     let mut base_dir = get_storage_dir(&app);
     base_dir.push(&path);
 
     let bytes = std::fs::read(&base_dir).map_err(|e| format!("read image file: {}", e))?;
     let image = image::load_from_memory(&bytes).map_err(|e| format!("decode image: {e}"))?;
+    let max_size = max_size.clamp(320, 4096);
+    let image = if image.width().max(image.height()) > max_size {
+        image.resize(max_size, max_size, image::imageops::FilterType::Triangle)
+    } else {
+        image
+    };
     let mut png = std::io::Cursor::new(Vec::new());
     image
         .write_to(&mut png, image::ImageFormat::Png)
@@ -1624,7 +1634,7 @@ pub fn get_image_base64(app: AppHandle, path: String) -> Result<String, String> 
     Ok(base64::engine::general_purpose::STANDARD.encode(png.into_inner()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_image_thumbnail(app: AppHandle, path: String, max_size: u32) -> Result<String, String> {
     let base_dir = get_storage_dir(&app);
     let image_path = base_dir.join(&path);
@@ -1871,7 +1881,7 @@ pub fn get_storage_path(app: AppHandle) -> Result<String, String> {
     Ok(get_storage_dir(&app).to_string_lossy().to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ensure_thumbnail(app: AppHandle, path: String) -> Result<String, String> {
     let mut base = get_storage_dir(&app);
     base.push(&path);

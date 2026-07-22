@@ -1,4 +1,6 @@
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU64, Ordering};
+#[cfg(target_os = "windows")]
+use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
 use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
@@ -20,6 +22,10 @@ static HOOK_HANDLE: AtomicPtr<core::ffi::c_void> = AtomicPtr::new(core::ptr::nul
 static KEYBOARD_HOOK_HANDLE: AtomicPtr<core::ffi::c_void> = AtomicPtr::new(core::ptr::null_mut());
 #[cfg(target_os = "windows")]
 static WIN_V_DOWN: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "windows")]
+static SHOW_CLIPBOARD_SENDER: OnceLock<SyncSender<()>> = OnceLock::new();
+#[cfg(target_os = "windows")]
+static SHOW_CLIPBOARD_PENDING: AtomicBool = AtomicBool::new(false);
 
 static TOGGLING: AtomicBool = AtomicBool::new(false);
 
@@ -131,21 +137,54 @@ pub fn toggle_window(app: &AppHandle) {
 
 pub fn show_clipboard_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let focused = window.is_focused().unwrap_or(false);
-
-        #[cfg(target_os = "windows")]
-        if !focused {
-            crate::paste::save_foreground_window();
-            unsafe {
-                let _ = AllowSetForegroundWindow(0xFFFFFFFF);
-            }
-        }
-
         let _ = app.emit("show-clipboard", ());
         let _ = window.show();
         let _ = window.set_focus();
     } else {
         log::warn!("[show_clipboard_window] main window not found");
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn install_show_clipboard_worker(app: &AppHandle) -> Result<(), String> {
+    if SHOW_CLIPBOARD_SENDER.get().is_some() {
+        return Ok(());
+    }
+
+    let (sender, receiver) = sync_channel(1);
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("clipboard-shortcut-worker".to_string())
+        .spawn(move || {
+            while receiver.recv().is_ok() {
+                show_clipboard_window(&app);
+                SHOW_CLIPBOARD_PENDING.store(false, Ordering::SeqCst);
+            }
+        })
+        .map_err(|error| format!("Failed to start clipboard shortcut worker: {error}"))?;
+
+    SHOW_CLIPBOARD_SENDER
+        .set(sender)
+        .map_err(|_| "Clipboard shortcut worker already initialized".to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn queue_show_clipboard_window() {
+    if SHOW_CLIPBOARD_PENDING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    let Some(sender) = SHOW_CLIPBOARD_SENDER.get() else {
+        SHOW_CLIPBOARD_PENDING.store(false, Ordering::SeqCst);
+        return;
+    };
+
+    match sender.try_send(()) {
+        Ok(()) | Err(TrySendError::Full(())) => {}
+        Err(TrySendError::Disconnected(())) => {
+            SHOW_CLIPBOARD_PENDING.store(false, Ordering::SeqCst);
+            log::error!("Clipboard shortcut worker disconnected");
+        }
     }
 }
 
@@ -297,9 +336,8 @@ unsafe extern "system" fn keyboard_hook_callback(
 
                 if should_intercept_win_v(hook_struct.vkCode, win, ctrl, shift, alt) {
                     WIN_V_DOWN.store(true, Ordering::SeqCst);
-                    if let Some(app) = APP_HANDLE.get() {
-                        show_clipboard_window(app);
-                    }
+                    let _ = AllowSetForegroundWindow(0xFFFFFFFF);
+                    queue_show_clipboard_window();
                     return LRESULT(1);
                 }
             }
@@ -335,6 +373,10 @@ pub fn install_keyboard_hook(app: &AppHandle) {
     #[cfg(target_os = "windows")]
     {
         APP_HANDLE.set(app.clone()).ok();
+        if let Err(error) = install_show_clipboard_worker(app) {
+            log::error!("{error}");
+            return;
+        }
         let hook =
             unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook_callback), None, 0) };
         if let Ok(h) = hook {
