@@ -219,18 +219,22 @@ fn paste_with_defocus(app: &AppHandle) -> Result<(), String> {
         }
     }
 
-    // Wait for user to release Ctrl/Alt from the radial menu gesture (Ctrl+Alt+RightClick).
-    // If we send Ctrl+V while the physical Ctrl is still held, the simulated Ctrl release
-    // can race with the physical release, causing the target app to receive a bare 'V'.
+    // Wait for modifiers from the popup gestures to be released before sending Ctrl+V.
     #[cfg(target_os = "windows")]
     {
-        use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_MENU};
+        use windows::Win32::UI::Input::KeyboardAndMouse::{
+            GetAsyncKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN,
+        };
         let start = std::time::Instant::now();
         let timeout = Duration::from_millis(500);
         loop {
             let ctrl_up = unsafe { (GetAsyncKeyState(VK_CONTROL.0 as i32) as u16) & 0x8000 } == 0;
             let alt_up = unsafe { (GetAsyncKeyState(VK_MENU.0 as i32) as u16) & 0x8000 } == 0;
-            if ctrl_up && alt_up {
+            let win_up = unsafe {
+                (GetAsyncKeyState(VK_LWIN.0 as i32) as u16) & 0x8000 == 0
+                    && (GetAsyncKeyState(VK_RWIN.0 as i32) as u16) & 0x8000 == 0
+            };
+            if ctrl_up && alt_up && win_up {
                 break;
             }
             if start.elapsed() > timeout {

@@ -247,7 +247,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         // Use base64 data URI for reliable cross-platform display
         const base64 = await invoke<string>("get_image_thumbnail", {
           path: record.content,
-          maxSize: 360,
+          maxSize: 264,
         });
         const url = `data:image/png;base64,${base64}`;
         set({ thumbnailCache: trimCache({ ...get().thumbnailCache, [record.id]: url }, MAX_THUMBNAILS) });

@@ -594,6 +594,26 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn collect_unreferenced_image_contents(
+    state: &DbState,
+    image_contents: &[String],
+) -> Result<Vec<String>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    Ok(image_contents
+        .iter()
+        .filter(|content| {
+            !conn
+                .query_row(
+                    "SELECT COUNT(*) > 0 FROM clipboard_records WHERE content = ?1",
+                    params![content],
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap_or(false)
+        })
+        .cloned()
+        .collect())
+}
+
 pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let days;
     let image_contents: Vec<String>;
@@ -653,19 +673,9 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
     // Content-hash filenames mean multiple records can share the same file on disk.
     let base_dir = get_storage_dir(app);
     let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    for content in &image_contents {
-        let still_referenced: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM clipboard_records WHERE content = ?1",
-                params![content],
-                |row| row.get(0),
-            )
-            .unwrap_or(false);
-        if still_referenced {
-            continue;
-        }
-        let file_path = base_dir.join(content);
+    let unreferenced_images = collect_unreferenced_image_contents(&state, &image_contents)?;
+    for content in unreferenced_images {
+        let file_path = base_dir.join(&content);
         let _ = std::fs::remove_file(&file_path);
         if let Some(filename) = file_path.file_name() {
             let thumb_path = file_path
@@ -694,6 +704,7 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
     for id in deleted_ids {
         let _ = app.emit("clipboard-deleted", id);
     }
+    // Tray refresh reads settings, so no database guard may be alive here.
     crate::tray::refresh_tray_menu(app).ok();
 
     Ok(())
@@ -942,7 +953,7 @@ pub fn toggle_clipboard_favorite(app: AppHandle, id: String) -> Result<bool, Str
         "clipboard-favorite-changed",
         serde_json::json!({ "id": id, "is_favorite": is_favorite }),
     );
-    crate::tray::refresh_tray_menu(&app).ok();
+    crate::tray::schedule_tray_refresh(&app);
     Ok(is_favorite)
 }
 
@@ -992,19 +1003,22 @@ pub fn get_clipboard_unread_count(app: AppHandle) -> i64 {
     get_unread_count_sync(&app)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn mark_clipboard_read(app: AppHandle) -> Result<(), String> {
-    {
+    let changed = {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
-            "INSERT INTO settings (key, value) VALUES ('clipboard_unread_count', '0') ON CONFLICT(key) DO UPDATE SET value = '0'",
+            "UPDATE settings SET value = '0' WHERE key = 'clipboard_unread_count' AND value <> '0'",
             [],
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+    };
+    if changed == 0 {
+        return Ok(());
     }
     let _ = app.emit("clipboard-unread-changed", 0);
-    crate::tray::refresh_tray_menu(&app).ok();
+    crate::tray::schedule_tray_refresh(&app);
     Ok(())
 }
 
@@ -1051,7 +1065,7 @@ pub fn delete_clipboard_record(app: AppHandle, id: String) -> Result<(), String>
         remove_stored_image(&get_storage_dir(&app), &content);
     }
 
-    crate::tray::refresh_tray_menu(&app).ok();
+    crate::tray::schedule_tray_refresh(&app);
 
     Ok(())
 }
@@ -1602,7 +1616,7 @@ pub async fn import_user_data(app: AppHandle) -> Result<serde_json::Value, Strin
         log::warn!("clipboard limit enforcement after import failed: {error}");
     }
     let _ = app.emit("clipboard-refresh", ());
-    crate::tray::refresh_tray_menu(&app).ok();
+    crate::tray::schedule_tray_refresh(&app);
     Ok(serde_json::json!({
         "path": path.to_string_lossy(),
         "settings_count": settings.len(),
@@ -1710,7 +1724,7 @@ pub fn set_setting(app: AppHandle, key: String, value: String) -> Result<(), Str
     }
     if matches!(key.as_str(), "max_history_items" | "max_storage_mb") {
         enforce_clipboard_limits(&app)?;
-        crate::tray::refresh_tray_menu(&app).ok();
+        crate::tray::schedule_tray_refresh(&app);
     }
     Ok(())
 }
@@ -1754,7 +1768,7 @@ pub fn set_settings_batch(
 
     if settings.contains_key("max_history_items") || settings.contains_key("max_storage_mb") {
         enforce_clipboard_limits(&app)?;
-        crate::tray::refresh_tray_menu(&app).ok();
+        crate::tray::schedule_tray_refresh(&app);
     }
     Ok(())
 }
@@ -2180,5 +2194,31 @@ mod tests {
 
         assert!(table_has_column(&conn, "clipboard_records", "user_api_key").unwrap());
         assert!(table_has_column(&conn, "clipboard_records", "is_favorite").unwrap());
+    }
+
+    #[test]
+    fn unreferenced_image_lookup_releases_database_lock() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE clipboard_records (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL
+            );
+            INSERT INTO clipboard_records (id, content)
+            VALUES ('kept', 'images/kept.png');",
+        )
+        .unwrap();
+        let state = DbState {
+            conn: Mutex::new(conn),
+        };
+
+        let unreferenced = collect_unreferenced_image_contents(
+            &state,
+            &["images/kept.png".into(), "images/orphan.png".into()],
+        )
+        .unwrap();
+
+        assert_eq!(unreferenced, vec!["images/orphan.png"]);
+        assert!(state.conn.try_lock().is_ok());
     }
 }

@@ -94,7 +94,7 @@ fn is_previewable_image_file(path: &str) -> bool {
 }
 
 const LARGE_IMAGE_THRESHOLD_BYTES: u64 = 10 * 1024 * 1024;
-const THUMBNAIL_MAX_SIZE: u32 = 360;
+const THUMBNAIL_MAX_SIZE: u32 = 264;
 const TEXT_EVENT_PREVIEW_CHARS: usize = 600;
 
 fn is_image_file(path: &str) -> bool {
@@ -662,7 +662,7 @@ fn insert_and_emit(app: &AppHandle, record_type: &str, content: &str) {
     if let Err(error) = crate::db::enforce_clipboard_limits(app) {
         log::warn!("clipboard limit enforcement failed: {error}");
     }
-    crate::tray::refresh_tray_menu(app).ok();
+    crate::tray::schedule_tray_refresh(app);
 }
 
 pub fn sync_monitor_cache(handle: &AppHandle) {

@@ -158,6 +158,8 @@ html, body, #root {
   user-select: none;
   -webkit-user-select: none;
   -webkit-font-smoothing: antialiased;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
 }
 
 *::-webkit-scrollbar:horizontal {

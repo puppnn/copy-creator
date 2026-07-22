@@ -1,5 +1,7 @@
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::tray::TrayIconBuilder;
@@ -8,6 +10,8 @@ use tauri::{AppHandle, Manager};
 pub struct TrayState {
     pub tray: Mutex<Option<tauri::tray::TrayIcon>>,
 }
+
+static TRAY_REFRESH_SENDER: OnceLock<SyncSender<()>> = OnceLock::new();
 
 fn compact_text(value: &str, max_chars: usize) -> String {
     let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -215,6 +219,35 @@ pub fn refresh_tray_menu(app: &AppHandle) -> Result<(), String> {
         tray.set_tooltip(Some(tooltip)).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+pub fn schedule_tray_refresh(app: &AppHandle) {
+    let sender = TRAY_REFRESH_SENDER.get_or_init(|| {
+        let (sender, receiver) = sync_channel(1);
+        let app = app.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name("tray-refresh-worker".to_string())
+            .spawn(move || {
+                while receiver.recv().is_ok() {
+                    std::thread::sleep(Duration::from_millis(75));
+                    while receiver.try_recv().is_ok() {}
+                    if let Err(error) = refresh_tray_menu(&app) {
+                        log::warn!("tray refresh failed: {error}");
+                    }
+                }
+            })
+        {
+            log::error!("failed to start tray refresh worker: {error}");
+        }
+        sender
+    });
+
+    match sender.try_send(()) {
+        Ok(()) | Err(TrySendError::Full(())) => {}
+        Err(TrySendError::Disconnected(())) => {
+            log::error!("tray refresh worker disconnected");
+        }
+    }
 }
 
 #[tauri::command]
