@@ -733,6 +733,7 @@ fn insert_and_emit(app: &AppHandle, record_type: &str, content: &str) {
             "guessed_service": guessed_service,
             "label": null,
             "is_favorite": false,
+            "favorite_note": "",
         }),
     )
     .ok();

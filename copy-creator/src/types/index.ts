@@ -16,6 +16,7 @@ export interface ClipboardRecord {
   is_api_key?: boolean;
   user_api_key?: boolean;
   is_favorite: boolean;
+  favorite_note: string;
   key_preview?: string;
   guessed_service?: string | null;
   label?: ApiKeyLabel | null;

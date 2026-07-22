@@ -102,6 +102,7 @@ pub struct DbState {
 }
 
 const CLIPBOARD_CONTENT_PREVIEW_CHARS: usize = 600;
+const FAVORITE_NOTE_MAX_CHARS: usize = 200;
 
 fn make_content_preview(content: &str) -> (String, i64, bool) {
     let total_chars = content.chars().count();
@@ -119,15 +120,15 @@ fn make_content_preview(content: &str) -> (String, i64, bool) {
     )
 }
 
-fn clipboard_record_json(
-    id: String,
-    rec_type: String,
-    content: String,
-    source_app: String,
-    created_at: String,
-    user_api_key: i64,
-    is_favorite: i64,
-) -> serde_json::Value {
+fn clipboard_record_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Value> {
+    let id = row.get::<_, String>(0)?;
+    let rec_type = row.get::<_, String>(1)?;
+    let content = row.get::<_, String>(2)?;
+    let source_app = row.get::<_, String>(3)?;
+    let created_at = row.get::<_, String>(4)?;
+    let user_api_key = row.get::<_, i64>(5)?;
+    let is_favorite = row.get::<_, i64>(6)?;
+    let favorite_note = row.get::<_, String>(7)?;
     let (list_content, content_length, content_truncated) = if rec_type == "text" {
         make_content_preview(&content)
     } else {
@@ -139,7 +140,7 @@ fn clipboard_record_json(
         content_length
     };
 
-    serde_json::json!({
+    Ok(serde_json::json!({
         "id": id,
         "type": rec_type,
         "content": list_content,
@@ -149,7 +150,8 @@ fn clipboard_record_json(
         "created_at": created_at,
         "user_api_key": user_api_key,
         "is_favorite": is_favorite != 0,
-    })
+        "favorite_note": favorite_note,
+    }))
 }
 
 fn db_path(app: &AppHandle) -> PathBuf {
@@ -448,6 +450,12 @@ fn migrate_clipboard_record_schema(conn: &Connection) -> rusqlite::Result<()> {
             [],
         )?;
     }
+    if !table_has_column(conn, "clipboard_records", "favorite_note")? {
+        conn.execute(
+            "ALTER TABLE clipboard_records ADD COLUMN favorite_note TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_clipboard_favorite_created_at ON clipboard_records(is_favorite, created_at)",
         [],
@@ -497,7 +505,8 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             source_app TEXT DEFAULT '',
             created_at TEXT NOT NULL,
             user_api_key INTEGER DEFAULT 0,
-            is_favorite INTEGER NOT NULL DEFAULT 0
+            is_favorite INTEGER NOT NULL DEFAULT 0,
+            favorite_note TEXT NOT NULL DEFAULT ''
         );
 
         CREATE INDEX IF NOT EXISTS idx_clipboard_created_at
@@ -764,46 +773,26 @@ pub fn get_clipboard_records(
             .replace('%', "\\%")
             .replace('_', "\\_");
         let sql = format!(
-            "SELECT id, type, content, source_app, created_at, user_api_key, is_favorite FROM clipboard_records
-             WHERE content LIKE '%' || ?1 || '%' ESCAPE '\\' {} ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+            "SELECT id, type, content, source_app, created_at, user_api_key, is_favorite, favorite_note FROM clipboard_records
+             WHERE (content LIKE '%' || ?1 || '%' ESCAPE '\\' OR favorite_note LIKE '%' || ?1 || '%' ESCAPE '\\') {} ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
             cat_filter.1
         );
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(params![escaped, lim, off], |row| {
-                Ok(clipboard_record_json(
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, i64>(6)?,
-                ))
-            })
+            .query_map(params![escaped, lim, off], clipboard_record_json)
             .map_err(|e| e.to_string())?;
         for row in rows {
             records.push(row.map_err(|e| e.to_string())?);
         }
     } else {
         let sql = format!(
-            "SELECT id, type, content, source_app, created_at, user_api_key, is_favorite FROM clipboard_records
+            "SELECT id, type, content, source_app, created_at, user_api_key, is_favorite, favorite_note FROM clipboard_records
              {} ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
             cat_filter.0
         );
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(params![lim, off], |row| {
-                Ok(clipboard_record_json(
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, i64>(6)?,
-                ))
-            })
+            .query_map(params![lim, off], clipboard_record_json)
             .map_err(|e| e.to_string())?;
         for row in rows {
             records.push(row.map_err(|e| e.to_string())?);
@@ -984,6 +973,43 @@ pub fn toggle_clipboard_favorite(app: AppHandle, id: String) -> Result<bool, Str
     );
     crate::tray::schedule_tray_refresh(&app);
     Ok(is_favorite)
+}
+
+fn normalize_favorite_note(note: &str) -> Result<String, String> {
+    let note = note.trim();
+    if note.chars().count() > FAVORITE_NOTE_MAX_CHARS {
+        return Err(format!(
+            "favorite note cannot exceed {FAVORITE_NOTE_MAX_CHARS} characters"
+        ));
+    }
+    Ok(note.to_string())
+}
+
+#[tauri::command]
+pub fn set_clipboard_favorite_note(
+    app: AppHandle,
+    id: String,
+    note: String,
+) -> Result<String, String> {
+    let favorite_note = normalize_favorite_note(&note)?;
+    let updated = {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE clipboard_records SET favorite_note = ?1 WHERE id = ?2 AND is_favorite = 1",
+            params![&favorite_note, &id],
+        )
+        .map_err(|e| e.to_string())?
+    };
+    if updated == 0 {
+        return Err("favorite clipboard record not found".to_string());
+    }
+
+    let _ = app.emit(
+        "clipboard-favorite-note-changed",
+        serde_json::json!({ "id": id, "favorite_note": favorite_note }),
+    );
+    Ok(favorite_note)
 }
 
 pub fn get_unread_count_sync(app: &AppHandle) -> i64 {
@@ -1376,6 +1402,8 @@ struct FavoriteExportRecord {
     created_at: String,
     #[serde(default)]
     user_api_key: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    favorite_note: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     image_base64: Option<String>,
 }
@@ -1433,7 +1461,7 @@ pub async fn export_user_data(app: AppHandle) -> Result<serde_json::Value, Strin
 
         let mut stmt = conn
             .prepare(
-                "SELECT id, type, content, source_app, created_at, user_api_key FROM clipboard_records WHERE is_favorite = 1 ORDER BY created_at DESC",
+                "SELECT id, type, content, source_app, created_at, user_api_key, favorite_note FROM clipboard_records WHERE is_favorite = 1 ORDER BY created_at DESC",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
@@ -1445,6 +1473,7 @@ pub async fn export_user_data(app: AppHandle) -> Result<serde_json::Value, Strin
                     source_app: row.get(3)?,
                     created_at: row.get(4)?,
                     user_api_key: row.get::<_, i64>(5)? != 0,
+                    favorite_note: row.get(6)?,
                     image_base64: None,
                 })
             })
@@ -1558,15 +1587,17 @@ pub async fn import_user_data(app: AppHandle) -> Result<serde_json::Value, Strin
         if favorite.id.len() > 128
             || !matches!(
                 favorite.record_type.as_str(),
-                "text" | "image" | "link" | "file"
+                "text" | "image" | "link" | "explorer" | "file"
             )
             || favorite.content.len() > 10 * 1024 * 1024
+            || favorite.favorite_note.chars().count() > FAVORITE_NOTE_MAX_CHARS
         {
             for staged in &staged_files {
                 let _ = std::fs::remove_file(staged);
             }
             return Err("backup contains an invalid favorite record".to_string());
         }
+        favorite.favorite_note = favorite.favorite_note.trim().to_string();
 
         if favorite.record_type == "image" && !existing_ids.contains(&favorite.id) {
             let image_result = (|| -> Result<(PathBuf, String), String> {
@@ -1619,7 +1650,7 @@ pub async fn import_user_data(app: AppHandle) -> Result<serde_json::Value, Strin
         }
         for favorite in &prepared {
             tx.execute(
-                "INSERT INTO clipboard_records (id, type, content, source_app, created_at, user_api_key, is_favorite) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1) ON CONFLICT(id) DO UPDATE SET is_favorite = 1",
+                "INSERT INTO clipboard_records (id, type, content, source_app, created_at, user_api_key, is_favorite, favorite_note) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7) ON CONFLICT(id) DO UPDATE SET is_favorite = 1, favorite_note = excluded.favorite_note",
                 params![
                     &favorite.id,
                     &favorite.record_type,
@@ -1627,6 +1658,7 @@ pub async fn import_user_data(app: AppHandle) -> Result<serde_json::Value, Strin
                     &favorite.source_app,
                     &favorite.created_at,
                     favorite.user_api_key as i64,
+                    &favorite.favorite_note,
                 ],
             )
             .map_err(|e| e.to_string())?;
@@ -1835,7 +1867,8 @@ fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), String> {
                 source_app TEXT DEFAULT '',
                 created_at TEXT NOT NULL,
                 user_api_key INTEGER DEFAULT 0,
-                is_favorite INTEGER NOT NULL DEFAULT 0
+                is_favorite INTEGER NOT NULL DEFAULT 0,
+                favorite_note TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_records(created_at);
             CREATE TABLE IF NOT EXISTS phrase_groups (
@@ -2183,13 +2216,19 @@ mod tests {
 
         migrate_clipboard_record_schema(&conn).unwrap();
 
-        let rows: Vec<(String, String, i64, i64)> = conn
+        let rows: Vec<(String, String, i64, i64, String)> = conn
             .prepare(
-                "SELECT id, content, user_api_key, is_favorite FROM clipboard_records ORDER BY id",
+                "SELECT id, content, user_api_key, is_favorite, favorite_note FROM clipboard_records ORDER BY id",
             )
             .unwrap()
             .query_map([], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
             })
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
@@ -2198,8 +2237,8 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                ("one".into(), "preserve me".into(), 1, 0),
-                ("two".into(), "images/existing.png".into(), 0, 0),
+                ("one".into(), "preserve me".into(), 1, 0, "".into()),
+                ("two".into(), "images/existing.png".into(), 0, 0, "".into(),),
             ]
         );
     }
@@ -2223,6 +2262,17 @@ mod tests {
 
         assert!(table_has_column(&conn, "clipboard_records", "user_api_key").unwrap());
         assert!(table_has_column(&conn, "clipboard_records", "is_favorite").unwrap());
+        assert!(table_has_column(&conn, "clipboard_records", "favorite_note").unwrap());
+    }
+
+    #[test]
+    fn favorite_note_normalization_trims_and_limits_characters() {
+        assert_eq!(normalize_favorite_note("  项目账号  ").unwrap(), "项目账号");
+        assert_eq!(
+            normalize_favorite_note(&"备".repeat(FAVORITE_NOTE_MAX_CHARS)).unwrap(),
+            "备".repeat(FAVORITE_NOTE_MAX_CHARS)
+        );
+        assert!(normalize_favorite_note(&"备".repeat(FAVORITE_NOTE_MAX_CHARS + 1)).is_err());
     }
 
     #[test]
