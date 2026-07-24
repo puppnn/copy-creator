@@ -33,7 +33,8 @@ export function DataSection({ onImported }: DataSectionProps) {
       );
     } catch (error) {
       if (!String(error).toLowerCase().includes("cancelled")) {
-        setStatus(t("settings.transferFailed"));
+        const msg = String(error);
+        setStatus(t("settings.transferFailed") + (msg ? `: ${msg}` : ""));
       }
     } finally {
       setBusy(false);

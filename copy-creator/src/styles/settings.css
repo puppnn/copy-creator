@@ -418,7 +418,7 @@
 .settings-range-control {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 7px;
   min-width: 132px;
   color: var(--text-secondary);
@@ -426,16 +426,16 @@
 }
 
 .settings-number-input {
-  width: 84px;
+  width: 96px;
   height: 30px;
-  padding: 0 7px;
+  padding: 0 8px;
   border: 1px solid var(--card-border);
   border-radius: 7px;
   background: var(--input-bg);
   color: var(--text-primary);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-  text-align: right;
+  text-align: left;
   outline: none;
 }
 

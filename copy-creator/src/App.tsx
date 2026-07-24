@@ -170,6 +170,10 @@ function App() {
     await getCurrentWindow().hide();
   };
 
+  const handleMinimize = async () => {
+    await getCurrentWindow().minimize();
+  };
+
   const handleTogglePin = async () => {
     try {
       const next = await invoke<boolean>("toggle_always_on_top");
@@ -275,16 +279,27 @@ function App() {
           <h3 className="panel-window-title">
             {isSettingsPanel ? t("settings.title") : panelInfo ? t(panelInfo.titleKey) : ""}
           </h3>
-          <button
-            className="window-close-btn"
-            onClick={handleHide}
-            title={t("common.hide")}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+          <div className="window-header-actions">
+            <button
+              className="window-minimize-btn"
+              onClick={handleMinimize}
+              title={t("common.minimize")}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+            <button
+              className="window-close-btn"
+              onClick={handleHide}
+              title={t("common.hide")}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div className="panel-window-body">
           {isSettingsPanel ? (

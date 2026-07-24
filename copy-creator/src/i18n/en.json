@@ -138,7 +138,8 @@
     "on": "ON",
     "off": "OFF",
     "pinWindow": "Pin Window",
-    "unpinWindow": "Unpin Window"
+    "unpinWindow": "Unpin Window",
+    "minimize": "Minimize"
   },
   "radialMenu": {
     "empty": "No items"

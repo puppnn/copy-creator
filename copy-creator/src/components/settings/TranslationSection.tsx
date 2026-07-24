@@ -49,53 +49,61 @@ export function TranslationSection({
             onChange={setLocalEngine}
           />
         </div>
-        <div className="settings-row vertical">
-          <div className="settings-row-label">{t("settings.googleApiKey")}</div>
-          <input
-            className="settings-input"
-            type="password"
-            value={localGoogleApiKey}
-            onChange={(e) => setLocalGoogleApiKey(e.target.value)}
-            placeholder={t("settings.googleNote")}
-          />
-        </div>
-        <div className="settings-row vertical">
-          <div className="settings-row-label">{t("settings.translateProxy")}</div>
-          <input
-            className="settings-input"
-            value={localTranslateProxy}
-            onChange={(e) => setLocalTranslateProxy(e.target.value)}
-            placeholder={t("settings.translateProxyPlaceholder")}
-          />
-        </div>
-        <div className="settings-row vertical">
-          <div className="settings-row-label">{t("settings.apiUrl")}</div>
-          <input
-            className="settings-input"
-            value={localApiUrl}
-            onChange={(e) => setLocalApiUrl(e.target.value)}
-            placeholder={t("settings.apiUrlPlaceholder")}
-          />
-        </div>
-        <div className="settings-row vertical">
-          <div className="settings-row-label">{t("settings.apiKey")}</div>
-          <input
-            className="settings-input"
-            type="password"
-            value={localApiKey}
-            onChange={(e) => setLocalApiKey(e.target.value)}
-            placeholder={t("settings.apiKey")}
-          />
-        </div>
-        <div className="settings-row vertical">
-          <div className="settings-row-label">{t("settings.model")}</div>
-          <input
-            className="settings-input"
-            value={localModel}
-            onChange={(e) => setLocalModel(e.target.value)}
-            placeholder={t("settings.model")}
-          />
-        </div>
+        {localEngine === "google" && (
+          <>
+            <div className="settings-row vertical">
+              <div className="settings-row-label">{t("settings.googleApiKey")}</div>
+              <input
+                className="settings-input"
+                type="password"
+                value={localGoogleApiKey}
+                onChange={(e) => setLocalGoogleApiKey(e.target.value)}
+                placeholder={t("settings.googleNote")}
+              />
+            </div>
+            <div className="settings-row vertical">
+              <div className="settings-row-label">{t("settings.translateProxy")}</div>
+              <input
+                className="settings-input"
+                value={localTranslateProxy}
+                onChange={(e) => setLocalTranslateProxy(e.target.value)}
+                placeholder={t("settings.translateProxyPlaceholder")}
+              />
+            </div>
+          </>
+        )}
+        {localEngine === "ai" && (
+          <>
+            <div className="settings-row vertical">
+              <div className="settings-row-label">{t("settings.apiUrl")}</div>
+              <input
+                className="settings-input"
+                value={localApiUrl}
+                onChange={(e) => setLocalApiUrl(e.target.value)}
+                placeholder={t("settings.apiUrlPlaceholder")}
+              />
+            </div>
+            <div className="settings-row vertical">
+              <div className="settings-row-label">{t("settings.apiKey")}</div>
+              <input
+                className="settings-input"
+                type="password"
+                value={localApiKey}
+                onChange={(e) => setLocalApiKey(e.target.value)}
+                placeholder={t("settings.apiKey")}
+              />
+            </div>
+            <div className="settings-row vertical">
+              <div className="settings-row-label">{t("settings.model")}</div>
+              <input
+                className="settings-input"
+                value={localModel}
+                onChange={(e) => setLocalModel(e.target.value)}
+                placeholder={t("settings.model")}
+              />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

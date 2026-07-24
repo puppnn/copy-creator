@@ -11,7 +11,7 @@ import { TYPE_META } from "./utils";
 TYPE_META.text.icon = Icons.clipboard;
 TYPE_META.image.icon = Icons.image;
 TYPE_META.link.icon = Icons.link;
-TYPE_META.explorer.icon = Icons.file;
+TYPE_META.explorer.icon = Icons.link;
 TYPE_META.file.icon = Icons.file;
 
 const SCROLL_TOP_BUTTON_THRESHOLD = 180;

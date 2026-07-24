@@ -138,7 +138,8 @@
     "on": "已开启",
     "off": "已关闭",
     "pinWindow": "固定窗口",
-    "unpinWindow": "取消固定"
+    "unpinWindow": "取消固定",
+    "minimize": "最小化"
   },
   "radialMenu": {
     "empty": "暂无内容"

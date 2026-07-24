@@ -1020,6 +1020,10 @@ pub fn get_unread_count_sync(app: &AppHandle) -> i64 {
 }
 
 pub fn increment_unread_if_hidden(app: &AppHandle) -> i64 {
+    // Respect clipboard_notifications setting — don't show unread badge when notifications are off
+    if get_setting_sync(app, "clipboard_notifications").as_deref() != Some("1") {
+        return get_unread_count_sync(app);
+    }
     let is_being_viewed = app.get_webview_window("main").is_some_and(|window| {
         window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false)
     });
@@ -1055,6 +1059,9 @@ pub fn increment_unread_if_hidden(app: &AppHandle) -> i64 {
 
 #[tauri::command]
 pub fn get_clipboard_unread_count(app: AppHandle) -> i64 {
+    if get_setting_sync(&app, "clipboard_notifications").as_deref() != Some("1") {
+        return 0;
+    }
     get_unread_count_sync(&app)
 }
 
@@ -1375,7 +1382,10 @@ const EXPORT_SETTING_KEYS: &[&str] = &[
     "radial_menu_enabled",
     "shortcut_key",
     "ai_api_url",
+    "ai_api_key",
     "ai_model",
+    "google_api_key",
+    "translate_proxy",
     "max_history_items",
     "max_storage_mb",
     "image_max_dimension",
@@ -1386,9 +1396,12 @@ const EXPORT_SETTING_KEYS: &[&str] = &[
 
 #[derive(Serialize, Deserialize)]
 struct ClipboardExportBundle {
+    #[serde(default)]
     version: u32,
+    #[serde(default)]
     exported_at: String,
     settings: HashMap<String, String>,
+    #[serde(default)]
     favorites: Vec<FavoriteExportRecord>,
 }
 
@@ -1398,6 +1411,7 @@ struct FavoriteExportRecord {
     #[serde(rename = "type")]
     record_type: String,
     content: String,
+    #[serde(default)]
     source_app: String,
     created_at: String,
     #[serde(default)]
@@ -1519,6 +1533,7 @@ fn validate_import_setting(key: &str, value: &str) -> Option<String> {
 
     let valid = match key {
         "clipboard_retention" => matches!(value, "1week" | "1month" | "3months"),
+        "default_translate_engine" => matches!(value, "google" | "ai"),
         "theme" => matches!(value, "light" | "dark"),
         "language" => matches!(value, "zh-CN" | "en"),
         "radial_menu_enabled" | "clipboard_notifications" => matches!(value, "0" | "1"),
@@ -1550,7 +1565,7 @@ pub async fn import_user_data(app: AppHandle) -> Result<serde_json::Value, Strin
     let json = std::fs::read(&path).map_err(|e| format!("read import: {e}"))?;
     let bundle: ClipboardExportBundle =
         serde_json::from_slice(&json).map_err(|e| format!("invalid backup: {e}"))?;
-    if bundle.version != 1 {
+    if bundle.version != 1 && bundle.version != 0 {
         return Err(format!("unsupported backup version: {}", bundle.version));
     }
 
