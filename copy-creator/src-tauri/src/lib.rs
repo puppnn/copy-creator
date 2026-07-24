@@ -89,6 +89,11 @@ fn install_auto_hide_on_focus_loss(window: &tauri::WebviewWindow) {
             return;
         }
 
+        // Don't auto-hide if the window is minimized (user explicitly minimized it)
+        if event_window.is_minimized().unwrap_or(false) {
+            return;
+        }
+
         if let Err(error) = event_window.hide() {
             log::warn!("failed to hide unfocused main window: {error}");
         }
