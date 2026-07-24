@@ -6,10 +6,13 @@ mod translator;
 mod tray;
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 use tauri::Manager;
 use tauri_plugin_autostart::ManagerExt;
 
 static MAIN_WINDOW_PINNED: AtomicBool = AtomicBool::new(false);
+static LAST_MINIMIZED_AT: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
 
 #[cfg(target_os = "windows")]
 fn apply_backdrop_effect(window: &tauri::WebviewWindow) {
@@ -82,20 +85,63 @@ fn cursor_is_inside_window(window: &tauri::WebviewWindow) -> bool {
 fn install_auto_hide_on_focus_loss(window: &tauri::WebviewWindow) {
     let event_window = window.clone();
     window.on_window_event(move |event| {
-        if !matches!(event, tauri::WindowEvent::Focused(false))
-            || MAIN_WINDOW_PINNED.load(Ordering::SeqCst)
-            || cursor_is_inside_window(&event_window)
-        {
-            return;
-        }
+        match event {
+            tauri::WindowEvent::Focused(true) => {
+                // Focus gained — clear the minimise timestamp so future
+                // Focused(false) events go through the normal auto-hide path.
+                if let Some(lock) = LAST_MINIMIZED_AT.get() {
+                    *lock.lock().unwrap() = None;
+                }
+            }
+            tauri::WindowEvent::Focused(false) => {
+                if MAIN_WINDOW_PINNED.load(Ordering::SeqCst)
+                    || cursor_is_inside_window(&event_window)
+                {
+                    return;
+                }
 
-        // Don't auto-hide if the window is minimized (user explicitly minimized it)
-        if event_window.is_minimized().unwrap_or(false) {
-            return;
-        }
+                if event_window.is_minimized().unwrap_or(false) {
+                    // Record the moment the window was seen minimised.
+                    let lock =
+                        LAST_MINIMIZED_AT.get_or_init(|| Mutex::new(None));
+                    *lock.lock().unwrap() = Some(Instant::now());
+                    return;
+                }
 
-        if let Err(error) = event_window.hide() {
-            log::warn!("failed to hide unfocused main window: {error}");
+                // If the window was minimised within the last 3 seconds,
+                // suppress auto-hide — the user is most likely restoring it
+                // via the taskbar and the Focused(false) event is transient.
+                let recently_minimized = LAST_MINIMIZED_AT
+                    .get()
+                    .and_then(|lock| {
+                        lock.lock().unwrap().map(|t| {
+                            t.elapsed() < std::time::Duration::from_secs(3)
+                        })
+                    })
+                    .unwrap_or(false);
+
+                if recently_minimized {
+                    return;
+                }
+
+                // Normal path: defer the hide briefly so transient focus
+                // changes (e.g. the Focused(false) that fires *before* a
+                // minimise actually completes) can settle.
+                let window = event_window.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                    if MAIN_WINDOW_PINNED.load(Ordering::SeqCst)
+                        || window.is_minimized().unwrap_or(false)
+                        || window.is_focused().unwrap_or(false)
+                    {
+                        return;
+                    }
+                    if let Err(error) = window.hide() {
+                        log::warn!("failed to hide unfocused main window: {error}");
+                    }
+                });
+            }
+            _ => {}
         }
     });
 }

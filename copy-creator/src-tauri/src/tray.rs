@@ -132,6 +132,9 @@ fn build_tray_menu(
 
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        if window.is_minimized().unwrap_or(false) {
+            let _ = window.unminimize();
+        }
         window.show().ok();
         window.set_focus().ok();
     }
@@ -180,10 +183,12 @@ pub fn create_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 if button == tauri::tray::MouseButton::Left {
                     let app = tray.app_handle();
                     if let Some(window) = app.get_webview_window("main") {
-                        if window.is_visible().unwrap_or(false) {
+                        if window.is_minimized().unwrap_or(false) {
+                            show_main_window(&app);
+                        } else if window.is_visible().unwrap_or(false) {
                             window.hide().ok();
                         } else {
-                            show_main_window(app);
+                            show_main_window(&app);
                         }
                     }
                 }

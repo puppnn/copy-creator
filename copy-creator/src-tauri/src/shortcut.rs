@@ -61,12 +61,17 @@ pub fn toggle_window(app: &AppHandle) {
 
     if let Some(window) = app.get_webview_window("main") {
         let visible = window.is_visible().unwrap_or(false);
-        log::info!("[toggle_window] visible={}", visible);
+        let minimized = window.is_minimized().unwrap_or(false);
+        log::info!("[toggle_window] visible={} minimized={}", visible, minimized);
 
-        if visible {
+        if visible && !minimized {
             log::info!("[toggle_window] hiding window");
             let _ = window.hide();
         } else {
+            // Restore from minimized state before showing
+            if minimized {
+                let _ = window.unminimize();
+            }
             #[cfg(target_os = "windows")]
             {
                 crate::paste::save_foreground_window();
