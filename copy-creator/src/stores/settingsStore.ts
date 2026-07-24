@@ -20,6 +20,12 @@ interface SettingsState {
   shortcutKey: string;
   radialMenuEnabled: boolean;
   autostartEnabled: boolean;
+  maxHistoryItems: number;
+  maxStorageMb: number;
+  imageMaxDimension: number;
+  imageCompressionQuality: number;
+  largeImageHandling: string;
+  clipboardNotifications: boolean;
 
   toggleTheme: () => void;
   loadSettings: () => Promise<void>;
@@ -43,6 +49,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   shortcutKey: "",
   radialMenuEnabled: true,
   autostartEnabled: false,
+  maxHistoryItems: 2000,
+  maxStorageMb: 500,
+  imageMaxDimension: 4096,
+  imageCompressionQuality: 90,
+  largeImageHandling: "compress",
+  clipboardNotifications: false,
 
   toggleTheme: () => {
     const next = get().themeMode === "light" ? "dark" : "light";
@@ -57,6 +69,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const settings = await invoke<Record<string, string>>("get_all_settings");
 
       set({
+        themeMode: settings.theme === "dark" ? "dark" : "light",
         clipboardRetention: settings.clipboard_retention || "1month",
         defaultEngine: settings.default_translate_engine || "google",
         apiUrl: settings.ai_api_url || "",
@@ -69,6 +82,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         language: settings.language || "zh-CN",
         shortcutKey: settings.shortcut_key || "",
         radialMenuEnabled: settings.radial_menu_enabled !== "0",
+        maxHistoryItems: Number(settings.max_history_items) || 2000,
+        maxStorageMb: Number(settings.max_storage_mb) || 500,
+        imageMaxDimension: Number(settings.image_max_dimension) || 4096,
+        imageCompressionQuality: Number(settings.image_compression_quality) || 90,
+        largeImageHandling: settings.large_image_handling || "compress",
+        clipboardNotifications: settings.clipboard_notifications === "1",
       });
 
       // Read autostart state from the OS (plugin)

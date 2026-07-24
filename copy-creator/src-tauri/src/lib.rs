@@ -5,13 +5,18 @@ mod shortcut;
 mod translator;
 mod tray;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Manager;
 use tauri_plugin_autostart::ManagerExt;
+
+static MAIN_WINDOW_PINNED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "windows")]
 fn apply_backdrop_effect(window: &tauri::WebviewWindow) {
     use windows::Win32::Foundation::HWND;
-    use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_WINDOW_CORNER_PREFERENCE};
+    use windows::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_WINDOW_CORNER_PREFERENCE,
+    };
 
     let hwnd = window.hwnd().unwrap_or_default();
     if hwnd.is_invalid() {
@@ -49,6 +54,47 @@ fn apply_backdrop_effect(window: &tauri::WebviewWindow) {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn cursor_is_inside_window(window: &tauri::WebviewWindow) -> bool {
+    use windows::Win32::Foundation::{HWND, POINT, RECT};
+    use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetWindowRect};
+
+    let Ok(raw_hwnd) = window.hwnd() else {
+        return true;
+    };
+    let hwnd = HWND(raw_hwnd.0);
+    if hwnd.is_invalid() {
+        return true;
+    }
+
+    let mut cursor = POINT::default();
+    let mut rect = RECT::default();
+    if unsafe { GetCursorPos(&mut cursor) }.is_err()
+        || unsafe { GetWindowRect(hwnd, &mut rect) }.is_err()
+    {
+        return true;
+    }
+
+    cursor.x >= rect.left && cursor.x < rect.right && cursor.y >= rect.top && cursor.y < rect.bottom
+}
+
+#[cfg(target_os = "windows")]
+fn install_auto_hide_on_focus_loss(window: &tauri::WebviewWindow) {
+    let event_window = window.clone();
+    window.on_window_event(move |event| {
+        if !matches!(event, tauri::WindowEvent::Focused(false))
+            || MAIN_WINDOW_PINNED.load(Ordering::SeqCst)
+            || cursor_is_inside_window(&event_window)
+        {
+            return;
+        }
+
+        if let Err(error) = event_window.hide() {
+            log::warn!("failed to hide unfocused main window: {error}");
+        }
+    });
+}
+
 #[tauri::command]
 fn toggle_always_on_top(app: tauri::AppHandle) -> Result<bool, String> {
     let window = app
@@ -57,6 +103,7 @@ fn toggle_always_on_top(app: tauri::AppHandle) -> Result<bool, String> {
     let current = window.is_always_on_top().map_err(|e| e.to_string())?;
     let next = !current;
     window.set_always_on_top(next).map_err(|e| e.to_string())?;
+    MAIN_WINDOW_PINNED.store(next, Ordering::SeqCst);
     Ok(next)
 }
 
@@ -65,7 +112,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--hidden"]),
+        ))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -90,6 +141,9 @@ pub fn run() {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
                     apply_backdrop_effect(&window);
+                    MAIN_WINDOW_PINNED
+                        .store(window.is_always_on_top().unwrap_or(false), Ordering::SeqCst);
+                    install_auto_hide_on_focus_loss(&window);
                     paste::init_foreground_tracker(&window);
                 }
             }
@@ -97,10 +151,7 @@ pub fn run() {
             let is_autostart = std::env::args().any(|a| a == "--hidden");
 
             db::init_db(app.handle())?;
-            db::prune_old_records(app.handle()).ok();
-
-            // Always start with light theme
-            let _ = db::set_setting(app.handle().clone(), "theme".to_string(), "light".to_string());
+            db::enforce_clipboard_limits(app.handle()).ok();
 
             // Repair autostart registry entry to ensure --hidden arg is present
             let autostart = app.autolaunch();
@@ -110,22 +161,29 @@ pub fn run() {
 
             // Periodic pruning every hour
             let prune_handle = app.handle().clone();
-            std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(3600));
-                db::prune_old_records(&prune_handle).ok();
+            std::thread::Builder::new()
+                .name("clipboard-prune-worker".to_string())
+                .spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(3600));
+                    if let Err(error) = db::prune_old_records(&prune_handle) {
+                        log::warn!("periodic clipboard pruning failed: {error}");
+                    }
+                })?;
+
+            app.handle().manage(tray::TrayState {
+                tray: std::sync::Mutex::new(None),
             });
+            tray::create_tray(app.handle())?;
+            db::prune_old_records(app.handle()).ok();
 
             clipboard::start_monitor(app.handle())?;
-
-            app.handle().manage(tray::TrayState { tray: std::sync::Mutex::new(None) });
-            tray::create_tray(app.handle())?;
 
             shortcut::install_mouse_hook(app.handle());
 
             // Create hidden radial menu popup window
             {
-                use tauri::WebviewWindowBuilder;
                 use tauri::WebviewUrl;
+                use tauri::WebviewWindowBuilder;
                 let radial = WebviewWindowBuilder::new(
                     app,
                     "radial-menu",
@@ -170,7 +228,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             db::get_clipboard_records,
             db::get_clipboard_record_content,
+            clipboard::open_external_link,
             db::delete_clipboard_record,
+            db::toggle_clipboard_favorite,
+            db::set_clipboard_favorite_note,
+            db::get_clipboard_storage_stats,
+            db::get_clipboard_unread_count,
+            db::mark_clipboard_read,
             db::get_phrase_groups,
             db::create_phrase_group,
             db::update_phrase_group,
@@ -185,6 +249,11 @@ pub fn run() {
             db::get_all_settings,
             db::set_setting,
             db::set_settings_batch,
+            db::export_user_data,
+            db::import_user_data,
+            paste::copy_text,
+            paste::copy_image,
+            paste::copy_file,
             paste::paste_text,
             paste::paste_image,
             paste::paste_file,

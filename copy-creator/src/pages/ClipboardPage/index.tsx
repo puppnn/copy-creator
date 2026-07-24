@@ -1,17 +1,20 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useClipboardStore } from "../../stores/clipboardStore";
+import { useShallow } from "zustand/react/shallow";
+import KeyboardArrowUpRoundedIcon from "@mui/icons-material/KeyboardArrowUpRounded";
+import { useClipboardStore, type ClipType } from "../../stores/clipboardStore";
 import { Icons } from "../../components/Icons";
 import SearchInput from "../../components/SearchInput";
 import { ClipboardCard } from "./ClipboardCard";
 import { TYPE_META } from "./utils";
 
-type ClipType = "all" | "text" | "image" | "link" | "file" | "apikey";
-
 TYPE_META.text.icon = Icons.clipboard;
 TYPE_META.image.icon = Icons.image;
 TYPE_META.link.icon = Icons.link;
+TYPE_META.explorer.icon = Icons.file;
 TYPE_META.file.icon = Icons.file;
+
+const SCROLL_TOP_BUTTON_THRESHOLD = 180;
 
 export default function ClipboardPage() {
   const { t } = useTranslation();
@@ -26,17 +29,38 @@ export default function ClipboardPage() {
     setCategory,
     loadRecords,
     deleteRecord,
+    toggleFavorite,
     pasteRecord,
-  } = useClipboardStore();
+  } = useClipboardStore(
+    useShallow((state) => ({
+      records: state.records,
+      search: state.search,
+      loading: state.loading,
+      hasMore: state.hasMore,
+      category: state.category,
+      init: state.init,
+      setSearch: state.setSearch,
+      setCategory: state.setCategory,
+      loadRecords: state.loadRecords,
+      deleteRecord: state.deleteRecord,
+      toggleFavorite: state.toggleFavorite,
+      pasteRecord: state.pasteRecord,
+    })),
+  );
 
+  const pageRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const [hoverPreview, setHoverPreview] = useState<{ src: string; x: number; y: number } | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const categories: { key: ClipType; label: string }[] = [
     { key: "all", label: t("clipboard.all") },
+    { key: "favorite", label: t("clipboard.favorites") },
     { key: "text", label: t("clipboard.text") },
     { key: "image", label: t("clipboard.image") },
     { key: "link", label: t("clipboard.link") },
+    { key: "explorer", label: t("clipboard.explorer") },
     { key: "file", label: t("clipboard.file") },
     { key: "apikey", label: t("clipboard.apikey") },
   ];
@@ -46,6 +70,7 @@ export default function ClipboardPage() {
       text: t("clipboard.text"),
       image: t("clipboard.image"),
       link: t("clipboard.link"),
+      explorer: t("clipboard.explorer"),
       file: t("clipboard.file"),
     }),
     [t],
@@ -66,6 +91,11 @@ export default function ClipboardPage() {
     [deleteRecord],
   );
 
+  const handleToggleFavorite = useCallback(
+    (id: string) => toggleFavorite(id),
+    [toggleFavorite],
+  );
+
   const handleSearchChange = useCallback(
     (value: string) => {
       setSearch(value);
@@ -81,20 +111,66 @@ export default function ClipboardPage() {
     [setCategory, loadRecords],
   );
 
+  const handleListRef = useCallback((list: HTMLDivElement | null) => {
+    listRef.current = list;
+    setShowScrollTop(Boolean(list && list.scrollTop > SCROLL_TOP_BUTTON_THRESHOLD));
+  }, []);
+
+  const handleListScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    setShowScrollTop(event.currentTarget.scrollTop > SCROLL_TOP_BUTTON_THRESHOLD);
+  }, []);
+
+  const handleScrollToTop = useCallback(() => {
+    listRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
   const filtered = useMemo(() => {
     if (category === "all") return records;
+    if (category === "favorite") return records.filter((r) => r.is_favorite);
     if (category === "apikey") return records.filter((r) => r.is_api_key);
     return records.filter((r) => r.type === category);
   }, [records, category]);
 
   useEffect(() => {
     init();
-  }, []);
+  }, [init]);
 
   useEffect(() => {
     const timer = setTimeout(() => loadRecords(), 300);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [loadRecords, search]);
+
+  useEffect(() => {
+    const page = pageRef.current;
+    if (!page) return;
+
+    let ctrlPressed = false;
+    const setCtrlPressed = (pressed: boolean) => {
+      if (ctrlPressed === pressed) return;
+      ctrlPressed = pressed;
+      page.classList.toggle("is-ctrl-pressed", pressed);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Control" || event.ctrlKey) setCtrlPressed(true);
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key === "Control" || !event.ctrlKey) setCtrlPressed(false);
+    };
+    const handlePointerMove = (event: PointerEvent) => setCtrlPressed(event.ctrlKey);
+    const clearCtrlPressed = () => setCtrlPressed(false);
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", clearCtrlPressed);
+    page.addEventListener("pointermove", handlePointerMove);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", clearCtrlPressed);
+      page.removeEventListener("pointermove", handlePointerMove);
+      page.classList.remove("is-ctrl-pressed");
+    };
+  }, []);
 
   const handleThumbHover = useCallback((thumbSrc: string, rect: DOMRect) => {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
@@ -106,7 +182,7 @@ export default function ClipboardPage() {
   }, []);
 
   return (
-    <div className="clipboard-page">
+    <div ref={pageRef} className="clipboard-page">
       <div className="page-search">
         <SearchInput
           placeholder={t("clipboard.search")}
@@ -152,7 +228,11 @@ export default function ClipboardPage() {
           <span>{t("clipboard.empty")}</span>
         </div>
       ) : (
-        <div className="clipboard-list">
+        <div
+          ref={handleListRef}
+          className="clipboard-list"
+          onScroll={handleListScroll}
+        >
           {filtered.map((r, i) => (
             <ClipboardCard
               key={r.id}
@@ -161,6 +241,7 @@ export default function ClipboardPage() {
               getTypeLabel={getTypeLabel}
               onPaste={handlePaste}
               onDelete={handleDelete}
+              onToggleFavorite={handleToggleFavorite}
               onThumbHover={handleThumbHover}
               onThumbLeave={handleThumbLeave}
             />
@@ -175,6 +256,18 @@ export default function ClipboardPage() {
             </button>
           )}
         </div>
+      )}
+
+      {showScrollTop && filtered.length > 0 && (
+        <button
+          className="clipboard-scroll-top"
+          type="button"
+          title={t("clipboard.scrollToTop")}
+          aria-label={t("clipboard.scrollToTop")}
+          onClick={handleScrollToTop}
+        >
+          <KeyboardArrowUpRoundedIcon />
+        </button>
       )}
 
       {hoverPreview && (

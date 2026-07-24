@@ -7,7 +7,7 @@ export interface ApiKeyLabel {
 
 export interface ClipboardRecord {
   id: string;
-  type: "text" | "image" | "link" | "file";
+  type: "text" | "image" | "link" | "explorer" | "file";
   content: string;
   content_length?: number;
   content_truncated?: boolean;
@@ -15,6 +15,8 @@ export interface ClipboardRecord {
   created_at: string;
   is_api_key?: boolean;
   user_api_key?: boolean;
+  is_favorite: boolean;
+  favorite_note: string;
   key_preview?: string;
   guessed_service?: string | null;
   label?: ApiKeyLabel | null;

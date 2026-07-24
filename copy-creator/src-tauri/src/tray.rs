@@ -1,22 +1,140 @@
-use std::sync::Mutex;
-use tauri::{AppHandle, Manager};
-use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use std::path::Path;
+use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
+
+use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::tray::TrayIconBuilder;
+use tauri::{AppHandle, Manager};
 
 pub struct TrayState {
     pub tray: Mutex<Option<tauri::tray::TrayIcon>>,
 }
 
-fn build_tray_menu(app: &AppHandle, lang: &str) -> Result<tauri::menu::Menu<tauri::Wry>, Box<dyn std::error::Error>> {
-    let (show_text, quit_text) = if lang == "en" {
-        ("Show Window", "Quit")
+static TRAY_REFRESH_SENDER: OnceLock<SyncSender<()>> = OnceLock::new();
+
+fn compact_text(value: &str, max_chars: usize) -> String {
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut chars = normalized.chars();
+    let preview: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{preview}...")
     } else {
-        ("显示窗口", "退出")
+        preview
+    }
+}
+
+fn menu_title(record: &crate::db::ClipboardActionRecord, lang: &str) -> String {
+    let favorite = if record.is_favorite { "★ " } else { "" };
+    let value = if record.user_api_key || crate::db::is_api_key(&record.content) {
+        format!("API Key · {}", crate::db::make_key_preview(&record.content))
+    } else {
+        match record.record_type.as_str() {
+            "image" => {
+                let label = if lang == "en" { "Image" } else { "图片" };
+                let time = chrono::DateTime::parse_from_rfc3339(&record.created_at)
+                    .map(|value| {
+                        value
+                            .with_timezone(&chrono::Local)
+                            .format("%m-%d %H:%M")
+                            .to_string()
+                    })
+                    .unwrap_or_default();
+                format!("{label} · {time}")
+            }
+            "file" => Path::new(&record.content)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| compact_text(name, 36))
+                .unwrap_or_else(|| compact_text(&record.content, 36)),
+            _ => compact_text(&record.content, 36),
+        }
     };
+    format!("{favorite}{}", value.replace('&', "&&"))
+}
+
+fn build_tray_menu(
+    app: &AppHandle,
+    lang: &str,
+) -> Result<tauri::menu::Menu<tauri::Wry>, Box<dyn std::error::Error>> {
+    let (recent_text, copy_text, paste_text, show_text, quit_text, empty_text, unread_text) =
+        if lang == "en" {
+            (
+                "Recent Clipboard",
+                "Copy",
+                "Paste",
+                "Show Window",
+                "Quit",
+                "No records",
+                "unread",
+            )
+        } else {
+            (
+                "最近剪贴板",
+                "复制",
+                "粘贴",
+                "显示窗口",
+                "退出",
+                "暂无记录",
+                "条未读",
+            )
+        };
+
+    let unread_count = crate::db::get_unread_count_sync(app);
+    let recent = crate::db::get_recent_clipboard_records(app, 8).unwrap_or_default();
+    let mut builder = MenuBuilder::new(app);
+
+    if unread_count > 0 {
+        let label = format!("{unread_count} {unread_text}");
+        let unread = MenuItemBuilder::with_id("unread-count", label)
+            .enabled(false)
+            .build(app)?;
+        builder = builder.item(&unread).separator();
+    }
+
+    let heading = MenuItemBuilder::with_id("recent-heading", recent_text)
+        .enabled(false)
+        .build(app)?;
+    builder = builder.item(&heading);
+
+    if recent.is_empty() {
+        let empty = MenuItemBuilder::with_id("recent-empty", empty_text)
+            .enabled(false)
+            .build(app)?;
+        builder = builder.item(&empty);
+    } else {
+        for record in recent {
+            let copy = MenuItemBuilder::with_id(format!("tray-copy:{}", record.id), copy_text)
+                .build(app)?;
+            let paste = MenuItemBuilder::with_id(format!("tray-paste:{}", record.id), paste_text)
+                .build(app)?;
+            let submenu = SubmenuBuilder::with_id(
+                app,
+                format!("tray-record:{}", record.id),
+                menu_title(&record, lang),
+            )
+            .item(&copy)
+            .item(&paste)
+            .build()?;
+            builder = builder.item(&submenu);
+        }
+    }
 
     let show = MenuItemBuilder::with_id("show", show_text).build(app)?;
     let quit = MenuItemBuilder::with_id("quit", quit_text).build(app)?;
-    MenuBuilder::new(app).item(&show).item(&quit).build().map_err(Into::into)
+    builder
+        .separator()
+        .item(&show)
+        .item(&quit)
+        .build()
+        .map_err(Into::into)
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        window.show().ok();
+        window.set_focus().ok();
+    }
 }
 
 pub fn create_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -35,20 +153,27 @@ pub fn create_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .menu(&menu)
         .tooltip("Copy Creator")
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            "show" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    window.show().ok();
-                    window.set_focus().ok();
+        .on_menu_event(|app, event| {
+            let id = event.id().as_ref();
+            if let Some(record_id) = id.strip_prefix("tray-copy:") {
+                crate::paste::copy_record_by_id(app, record_id).ok();
+            } else if let Some(record_id) = id.strip_prefix("tray-paste:") {
+                crate::paste::paste_record_by_id(app, record_id).ok();
+            } else {
+                match id {
+                    "show" => show_main_window(app),
+                    "quit" => app.exit(0),
+                    _ => {}
                 }
             }
-            "quit" => {
-                app.exit(0);
-            }
-            _ => {}
         })
         .on_tray_icon_event(|tray, event| {
-            if let tauri::tray::TrayIconEvent::Click { button, button_state, .. } = event {
+            if let tauri::tray::TrayIconEvent::Click {
+                button,
+                button_state,
+                ..
+            } = event
+            {
                 if button_state != tauri::tray::MouseButtonState::Down {
                     return;
                 }
@@ -58,8 +183,7 @@ pub fn create_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                         if window.is_visible().unwrap_or(false) {
                             window.hide().ok();
                         } else {
-                            window.show().ok();
-                            window.set_focus().ok();
+                            show_main_window(app);
                         }
                     }
                 }
@@ -69,20 +193,60 @@ pub fn create_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     let state = app.state::<TrayState>();
     *state.tray.lock().unwrap() = Some(tray);
-
     Ok(())
+}
+
+pub fn refresh_tray_menu(app: &AppHandle) -> Result<(), String> {
+    let Some(state) = app.try_state::<TrayState>() else {
+        return Ok(());
+    };
+    let lang = crate::db::get_setting_sync(app, "language").unwrap_or_else(|| "zh-CN".to_string());
+    let menu = build_tray_menu(app, &lang).map_err(|e| e.to_string())?;
+    let unread_count = crate::db::get_unread_count_sync(app);
+    let tooltip = if unread_count > 0 {
+        format!("Copy Creator ({unread_count})")
+    } else {
+        "Copy Creator".to_string()
+    };
+
+    let tray_guard = state.tray.lock().map_err(|e| e.to_string())?;
+    if let Some(tray) = tray_guard.as_ref() {
+        tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
+        tray.set_tooltip(Some(tooltip)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+pub fn schedule_tray_refresh(app: &AppHandle) {
+    let sender = TRAY_REFRESH_SENDER.get_or_init(|| {
+        let (sender, receiver) = sync_channel(1);
+        let app = app.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name("tray-refresh-worker".to_string())
+            .spawn(move || {
+                while receiver.recv().is_ok() {
+                    std::thread::sleep(Duration::from_millis(75));
+                    while receiver.try_recv().is_ok() {}
+                    if let Err(error) = refresh_tray_menu(&app) {
+                        log::warn!("tray refresh failed: {error}");
+                    }
+                }
+            })
+        {
+            log::error!("failed to start tray refresh worker: {error}");
+        }
+        sender
+    });
+
+    match sender.try_send(()) {
+        Ok(()) | Err(TrySendError::Full(())) => {}
+        Err(TrySendError::Disconnected(())) => {
+            log::error!("tray refresh worker disconnected");
+        }
+    }
 }
 
 #[tauri::command]
 pub fn update_tray_language(app: AppHandle) -> Result<(), String> {
-    let lang = crate::db::get_setting_sync(&app, "language").unwrap_or_else(|| "zh-CN".to_string());
-    let menu = build_tray_menu(&app, &lang).map_err(|e| e.to_string())?;
-
-    let state = app.state::<TrayState>();
-    let tray_guard = state.tray.lock().map_err(|e| e.to_string())?;
-    if let Some(tray) = tray_guard.as_ref() {
-        tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
-    }
-
-    Ok(())
+    refresh_tray_menu(&app)
 }

@@ -1,14 +1,25 @@
 import { memo, useCallback, useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import StarBorderRoundedIcon from "@mui/icons-material/StarBorderRounded";
+import StarRoundedIcon from "@mui/icons-material/StarRounded";
+import EditNoteRoundedIcon from "@mui/icons-material/EditNoteRounded";
+import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
 import { Icons } from "../../components/Icons";
 import { ImageThumb } from "./ImageThumb";
 import { formatTime, getFileName, TYPE_META } from "./utils";
 import ApiKeyLabelPanel from "./ApiKeyLabelPanel";
+import FavoriteNoteEditor from "./FavoriteNoteEditor";
 import { useClipboardStore } from "../../stores/clipboardStore";
 
 const COLLAPSE_TEXT_LENGTH = 160;
 const COLLAPSE_LINE_COUNT = 4;
+const SELECTABLE_TEXT_TYPES = new Set<ClipboardRecord["type"]>([
+  "text",
+  "link",
+  "explorer",
+  "file",
+]);
 
 interface ClipboardCardProps {
   record: ClipboardRecord;
@@ -16,6 +27,7 @@ interface ClipboardCardProps {
   getTypeLabel: (type: string) => string;
   onPaste: (r: ClipboardRecord) => void;
   onDelete: (id: string) => void;
+  onToggleFavorite: (id: string) => void;
   onThumbHover: (thumbSrc: string, rect: DOMRect) => void;
   onThumbLeave: () => void;
 }
@@ -26,18 +38,22 @@ function ClipboardCardInner({
   getTypeLabel,
   onPaste,
   onDelete,
+  onToggleFavorite,
   onThumbHover,
   onThumbLeave,
 }: ClipboardCardProps) {
+  const { t } = useTranslation();
   const meta = TYPE_META[record.type] || TYPE_META.text;
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
+  const [favoriteNoteOpen, setFavoriteNoteOpen] = useState(false);
   const [textExpanded, setTextExpanded] = useState(false);
   const [fullContent, setFullContent] = useState<string | null>(null);
   const [loadingFullContent, setLoadingFullContent] = useState(false);
   const ctxRef = useRef<HTMLDivElement>(null);
   const loadRecords = useClipboardStore((s) => s.loadRecords);
   const getRecordContent = useClipboardStore((s) => s.getRecordContent);
+  const setFavoriteNote = useClipboardStore((s) => s.setFavoriteNote);
   const displayContent = fullContent ?? record.content;
   const textLineCount = displayContent.split(/\r\n|\r|\n/).length;
   const canToggleText =
@@ -67,8 +83,44 @@ function ClipboardCardInner({
   }, [ctxMenu]);
 
   const handlePaste = useCallback(() => {
-    if (!labelOpen) onPaste(record);
-  }, [onPaste, record, labelOpen]);
+    if (!labelOpen && !favoriteNoteOpen) onPaste(record);
+  }, [favoriteNoteOpen, labelOpen, onPaste, record]);
+
+  const handleCardClick = useCallback(
+    async (e: React.MouseEvent) => {
+      if (labelOpen || favoriteNoteOpen) return;
+
+      const selection = window.getSelection();
+      const hasSelectedCardText =
+        SELECTABLE_TEXT_TYPES.has(record.type) &&
+        selection !== null &&
+        !selection.isCollapsed &&
+        selection.toString().length > 0 &&
+        [selection.anchorNode, selection.focusNode].some(
+          (node) => node !== null && e.currentTarget.contains(node),
+        );
+
+      if (hasSelectedCardText) {
+        e.stopPropagation();
+        return;
+      }
+
+      if (record.type !== "link" || !e.ctrlKey) {
+        handlePaste();
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        const url = await getRecordContent(record);
+        await invoke("open_external_link", { url });
+      } catch (error) {
+        console.error("Failed to open link:", error);
+      }
+    },
+    [favoriteNoteOpen, getRecordContent, handlePaste, labelOpen, record],
+  );
 
   const handleDelete = useCallback(
     (e: React.MouseEvent) => {
@@ -76,6 +128,30 @@ function ClipboardCardInner({
       onDelete(record.id);
     },
     [onDelete, record.id],
+  );
+
+  const handleToggleFavorite = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setCtxMenu(null);
+      if (record.is_favorite) setFavoriteNoteOpen(false);
+      onToggleFavorite(record.id);
+    },
+    [onToggleFavorite, record.id, record.is_favorite],
+  );
+
+  const handleOpenFavoriteNote = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCtxMenu(null);
+    setLabelOpen(false);
+    setFavoriteNoteOpen(true);
+  }, []);
+
+  const handleSaveFavoriteNote = useCallback(
+    async (note: string) => {
+      await setFavoriteNote(record.id, note);
+    },
+    [record.id, setFavoriteNote],
   );
 
   const handleToggleText = useCallback(async (e: React.MouseEvent) => {
@@ -139,23 +215,14 @@ function ClipboardCardInner({
   const hasLabel = Boolean(record.is_api_key && record.label);
   const isUnlabeled = Boolean(record.is_api_key && !record.label);
 
-  // Keep badge text in local state to ensure re-render on label change
-  const [badgeText, setBadgeText] = useState("");
-  useEffect(() => {
-    if (record.label?.note) {
-      setBadgeText(record.label.note);
-    } else if (record.guessed_service) {
-      setBadgeText(record.guessed_service);
-    } else if (record.is_api_key) {
-      setBadgeText("未标注");
-    }
-  }, [record.label?.note, record.guessed_service, record.is_api_key]);
+  const badgeText =
+    record.label?.note || record.guessed_service || (record.is_api_key ? "未标注" : "");
 
   return (
     <div
-      className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}`}
+      className={`notification clipboard-card type-${record.type}${record.is_favorite ? " is-favorite" : ""}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}`}
       style={{ "--color": meta.color, "--enter-delay": index } as React.CSSProperties}
-      onClick={handlePaste}
+      onClick={handleCardClick}
       onContextMenu={handleContextMenu}
     >
       <div className="notibar" />
@@ -170,6 +237,7 @@ function ClipboardCardInner({
               className="api-key-badge"
               onClick={(e) => {
                 e.stopPropagation();
+                setFavoriteNoteOpen(false);
                 setLabelOpen((v) => !v);
               }}
             >
@@ -193,6 +261,8 @@ function ClipboardCardInner({
             />
           ) : record.type === "link" ? (
             <span className="clipboard-link-content">{record.content}</span>
+          ) : record.type === "explorer" ? (
+            <span className="clipboard-explorer-content">{record.content}</span>
           ) : record.type === "file" ? (
             <span className="clipboard-file-content">{getFileName(record.content)}</span>
           ) : (
@@ -201,6 +271,29 @@ function ClipboardCardInner({
             </span>
           )}
         </div>
+
+        {record.is_favorite && record.favorite_note && !favoriteNoteOpen && (
+          <div className="favorite-note-preview" onClick={(event) => event.stopPropagation()}>
+            <button
+              className="favorite-note-preview-edit"
+              type="button"
+              title={t("clipboard.editFavoriteNote")}
+              aria-label={t("clipboard.editFavoriteNote")}
+              onClick={handleOpenFavoriteNote}
+            >
+              <EditNoteRoundedIcon />
+            </button>
+            <span>{record.favorite_note}</span>
+          </div>
+        )}
+
+        {favoriteNoteOpen && record.is_favorite && (
+          <FavoriteNoteEditor
+            initialNote={record.favorite_note}
+            onSave={handleSaveFavoriteNote}
+            onCancel={() => setFavoriteNoteOpen(false)}
+          />
+        )}
 
         {labelOpen && record.is_api_key && record.key_preview && (
           <ApiKeyLabelPanel
@@ -216,6 +309,34 @@ function ClipboardCardInner({
         <div className="notititle clipboard-card-footer">
           <span className="clipboard-card-time">{formatTime(record.created_at)}</span>
           <div className="clipboard-card-actions">
+            {record.is_favorite && (
+              <button
+                className={`card-note-btn${record.favorite_note ? " has-note" : ""}`}
+                onClick={handleOpenFavoriteNote}
+                type="button"
+                title={
+                  record.favorite_note
+                    ? t("clipboard.editFavoriteNote")
+                    : t("clipboard.addFavoriteNote")
+                }
+                aria-label={
+                  record.favorite_note
+                    ? t("clipboard.editFavoriteNote")
+                    : t("clipboard.addFavoriteNote")
+                }
+              >
+                <EditNoteRoundedIcon />
+              </button>
+            )}
+            <button
+              className={`card-favorite-btn${record.is_favorite ? " active" : ""}`}
+              onClick={handleToggleFavorite}
+              type="button"
+              title={record.is_favorite ? t("clipboard.unfavorite") : t("clipboard.favorite")}
+              aria-label={record.is_favorite ? t("clipboard.unfavorite") : t("clipboard.favorite")}
+            >
+              {record.is_favorite ? <StarRoundedIcon /> : <StarBorderRoundedIcon />}
+            </button>
             {canToggleText && (
               <button
                 className="card-toggle-text-btn"
@@ -243,6 +364,19 @@ function ClipboardCardInner({
           style={{ top: ctxMenu.y, left: ctxMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
+          <button className="ctx-menu-item" onClick={handleToggleFavorite}>
+            {record.is_favorite ? <StarRoundedIcon /> : <StarBorderRoundedIcon />}
+            {record.is_favorite ? t("clipboard.unfavorite") : t("clipboard.favorite")}
+          </button>
+          {record.is_favorite && (
+            <button className="ctx-menu-item" onClick={handleOpenFavoriteNote}>
+              <EditNoteRoundedIcon />
+              {record.favorite_note
+                ? t("clipboard.editFavoriteNote")
+                : t("clipboard.addFavoriteNote")}
+            </button>
+          )}
+          <div className="ctx-menu-sep" />
           {record.is_api_key && (
             <button
               className="ctx-menu-item"

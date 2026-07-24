@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 
 type UnlistenFn = () => void;
 
-export const CLIP_TYPES = ["all", "text", "image", "link", "file", "apikey"] as const;
+export const CLIP_TYPES = ["all", "favorite", "text", "image", "link", "explorer", "file", "apikey"] as const;
 export type ClipType = (typeof CLIP_TYPES)[number];
 
 interface ApiKeyLabel {
@@ -16,7 +16,7 @@ interface ApiKeyLabel {
 
 interface ClipboardRecord {
   id: string;
-  type: "text" | "image" | "link" | "file";
+  type: "text" | "image" | "link" | "explorer" | "file";
   content: string;
   content_length?: number;
   content_truncated?: boolean;
@@ -24,6 +24,8 @@ interface ClipboardRecord {
   created_at: string;
   is_api_key?: boolean;
   user_api_key?: boolean;
+  is_favorite: boolean;
+  favorite_note: string;
   key_preview?: string;
   guessed_service?: string | null;
   label?: ApiKeyLabel | null;
@@ -47,6 +49,8 @@ interface ClipboardState {
   loadRecords: (append?: boolean) => Promise<void>;
   updateRecordLabel: (id: string, label: ApiKeyLabel) => void;
   deleteRecord: (id: string) => Promise<void>;
+  toggleFavorite: (id: string) => Promise<void>;
+  setFavoriteNote: (id: string, note: string) => Promise<string>;
   pasteRecord: (record: ClipboardRecord) => Promise<void>;
   getRecordContent: (record: ClipboardRecord) => Promise<string>;
   getThumbnail: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
@@ -57,7 +61,8 @@ let unlisten: UnlistenFn | null = null;
 
 const MAX_CONCURRENT = 3;
 const MAX_THUMBNAILS = 80;
-const MAX_FULL_IMAGES = 8;
+const MAX_FULL_IMAGES = 4;
+const FULL_IMAGE_PREVIEW_MAX_SIZE = 1600;
 let running = 0;
 const queue: (() => void)[] = [];
 
@@ -128,6 +133,30 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       }));
     });
 
+    listen<{ id: string; is_favorite: boolean }>("clipboard-favorite-changed", (event) => {
+      set((state) => ({
+        records: state.records.map((record) =>
+          record.id === event.payload.id
+            ? { ...record, is_favorite: event.payload.is_favorite }
+            : record,
+        ),
+      }));
+    });
+
+    listen<{ id: string; favorite_note: string }>("clipboard-favorite-note-changed", (event) => {
+      set((state) => ({
+        records: state.records.map((record) =>
+          record.id === event.payload.id
+            ? { ...record, favorite_note: event.payload.favorite_note }
+            : record,
+        ),
+      }));
+    });
+
+    listen("clipboard-refresh", () => {
+      get().loadRecords();
+    });
+
     get().loadRecords();
   },
 
@@ -188,6 +217,29 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     }
   },
 
+  toggleFavorite: async (id: string) => {
+    try {
+      const isFavorite = await invoke<boolean>("toggle_clipboard_favorite", { id });
+      set((state) => ({
+        records: state.records.map((record) =>
+          record.id === id ? { ...record, is_favorite: isFavorite } : record,
+        ),
+      }));
+    } catch (e) {
+      console.error("Failed to update favorite:", e);
+    }
+  },
+
+  setFavoriteNote: async (id: string, note: string) => {
+    const favoriteNote = await invoke<string>("set_clipboard_favorite_note", { id, note });
+    set((state) => ({
+      records: state.records.map((record) =>
+        record.id === id ? { ...record, favorite_note: favoriteNote } : record,
+      ),
+    }));
+    return favoriteNote;
+  },
+
   pasteRecord: async (record: ClipboardRecord) => {
     try {
       const content = await getFullContent(record);
@@ -217,7 +269,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         // Use base64 data URI for reliable cross-platform display
         const base64 = await invoke<string>("get_image_thumbnail", {
           path: record.content,
-          maxSize: 200,
+          maxSize: 264,
         });
         const url = `data:image/png;base64,${base64}`;
         set({ thumbnailCache: trimCache({ ...get().thumbnailCache, [record.id]: url }, MAX_THUMBNAILS) });
@@ -236,6 +288,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     try {
       const base64 = await invoke<string>("get_image_base64", {
         path: record.content,
+        maxSize: FULL_IMAGE_PREVIEW_MAX_SIZE,
       });
       const url = `data:image/png;base64,${base64}`;
       set({ imageCache: trimCache({ ...get().imageCache, [record.id]: url }, MAX_FULL_IMAGES) });

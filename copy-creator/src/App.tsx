@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import ClipboardPage from "./pages/ClipboardPage";
 import PhrasePage from "./pages/PhrasePage";
 import TranslationPage from "./pages/TranslationPage";
@@ -26,8 +27,69 @@ const NAV_ITEMS = [
 function App() {
   const { t } = useTranslation();
   const [activePanel, setActivePanel] = useState<string>("clipboard");
+  const [unreadCount, setUnreadCount] = useState(0);
   const { themeMode, toggleTheme, loadSettings } = useSettingsStore();
   const [isPinned, setIsPinned] = useState(false);
+  const markReadInFlightRef = useRef<Promise<void> | null>(null);
+
+  const markClipboardRead = useCallback(() => {
+    if (markReadInFlightRef.current) return markReadInFlightRef.current;
+    const request = invoke<void>("mark_clipboard_read")
+      .then(() => setUnreadCount(0))
+      .catch((e) => console.error("Failed to mark clipboard as read:", e))
+      .finally(() => {
+        markReadInFlightRef.current = null;
+      });
+    markReadInFlightRef.current = request;
+    return request;
+  }, []);
+
+  useEffect(() => {
+    const unlisten = listen("show-clipboard", () => {
+      setActivePanel("clipboard");
+      void markClipboardRead();
+    });
+
+    return () => {
+      void unlisten.then((dispose) => dispose());
+    };
+  }, [markClipboardRead]);
+
+  useEffect(() => {
+    let disposed = false;
+    const cleanup: Array<() => void> = [];
+    invoke<number>("get_clipboard_unread_count")
+      .then((count) => {
+        if (!disposed) setUnreadCount(count);
+      })
+      .catch(console.error);
+    listen<number>("clipboard-unread-changed", (event) => {
+      if (!disposed) setUnreadCount(event.payload);
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else cleanup.push(unlisten);
+    });
+
+    const currentWindow = getCurrentWindow();
+    currentWindow.onFocusChanged(({ payload: focused }) => {
+      if (focused && activePanel === "clipboard") markClipboardRead();
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else cleanup.push(unlisten);
+    });
+    Promise.all([currentWindow.isVisible(), currentWindow.isFocused()]).then(
+      ([visible, focused]) => {
+        if (!disposed && visible && focused && activePanel === "clipboard") {
+          markClipboardRead();
+        }
+      },
+    );
+
+    return () => {
+      disposed = true;
+      cleanup.forEach((unlisten) => unlisten());
+    };
+  }, [activePanel, markClipboardRead]);
 
   useEffect(() => {
     loadSettings().then(() => {
@@ -36,7 +98,7 @@ function App() {
         i18n.changeLanguage(lang);
       }
     });
-  }, []);
+  }, [loadSettings]);
 
   const SIDEBAR_MIN = 60;
   const SIDEBAR_MAX = 130;
@@ -127,10 +189,14 @@ function App() {
         ref={sidebarRef}
         className={`sidebar ${isCollapsed ? "collapsed" : ""}`}
         style={{ width: sidebarWidth, minWidth: sidebarWidth }}
-        data-tauri-drag-region
       >
-        <div className="sidebar-header" data-tauri-drag-region>
-          <img className="sidebar-logo" src="/logo_top.png" alt="logo" />
+        <div className="sidebar-header">
+          <img
+            className="sidebar-logo"
+            src="/logo_top.png"
+            alt="logo"
+            draggable={false}
+          />
           <span className="sidebar-brand">{t("brand.name")}</span>
         </div>
 
@@ -143,10 +209,20 @@ function App() {
               <button
                 key={item.panelType}
                 className={`sidebar-nav-item ${isActive ? "active" : ""}`}
-                onClick={() => setActivePanel(item.panelType)}
+                onClick={() => {
+                  setActivePanel(item.panelType);
+                  if (item.panelType === "clipboard") markClipboardRead();
+                }}
                 title={t(titleKey)}
               >
-                <span className="sidebar-nav-icon">{Icons[iconKey]}</span>
+                <span className="sidebar-nav-icon">
+                  {Icons[iconKey]}
+                  {item.panelType === "clipboard" && unreadCount > 0 && (
+                    <span className="sidebar-unread-badge">
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </span>
+                  )}
+                </span>
                 <span className="sidebar-nav-label">{t(titleKey)}</span>
               </button>
             );
@@ -195,11 +271,15 @@ function App() {
       </div>
 
       <div className="panel-area">
-        <div className="panel-window-header" data-tauri-drag-region>
-          <h3 className="panel-window-title" data-tauri-drag-region>
+        <div className="panel-window-header">
+          <h3 className="panel-window-title">
             {isSettingsPanel ? t("settings.title") : panelInfo ? t(panelInfo.titleKey) : ""}
           </h3>
-          <button className="window-close-btn" onClick={handleHide} title={t("common.hide")}>
+          <button
+            className="window-close-btn"
+            onClick={handleHide}
+            title={t("common.hide")}
+          >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
