@@ -18,7 +18,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%2010+-brightgreen.svg)
 ![Tauri](https://img.shields.io/badge/Tauri-2.x-ffc131.svg)
 ![React](https://img.shields.io/badge/React-19-61dafb.svg)
-![Version](https://img.shields.io/badge/version-0.2.22-00a6a6.svg)
+![Version](https://img.shields.io/badge/version-0.2.24-00a6a6.svg)
 
 </div>
 
@@ -28,9 +28,9 @@
 
 Copy Creator 是一款轻量级的 Windows 桌面效率工具，以悬浮窗形式呈现，关闭后自动驻留系统托盘。它集成了剪切板历史管理、快捷短语和翻译三大核心功能，帮助用户在日常工作中提升文本处理效率。
 
-本仓库 Fork 自 [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator)，在保留原有功能的基础上，选择性迁移了 OneClip 的部分能力，并针对 Windows 下的剪切板交互、粘贴焦点、图片预览和窗口稳定性进行了持续优化。当前定制版本为 **v0.2.22**。
+本仓库 Fork 自 [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator)，在保留原有功能的基础上，选择性迁移了 OneClip 的部分能力，并针对 Windows 下的剪切板交互、粘贴焦点、图片预览和窗口稳定性进行了持续优化。当前定制版本为 **v0.2.24**。
 
-## 本 Fork 的改进（v0.2.22）
+## 本 Fork 的改进（v0.2.24）
 
 相对上游基线，本 Fork 对剪切板、图片处理、窗口交互和数据管理进行了系统扩展。可在 [GitHub Compare](https://github.com/puppnn/copy-creator/compare/5b415599e82b61b13e034016ca3c287cdbd1a418...main) 查看完整代码差异。
 
@@ -38,6 +38,8 @@ Copy Creator 是一款轻量级的 Windows 桌面效率工具，以悬浮窗形�
 
 - 新增**收藏**功能和独立收藏分类，可随时收藏、取消收藏；自动清理历史或超出容量时优先保留收藏内容
 - 收藏条目支持添加、编辑和清空备注，搜索与数据导入导出会一并保留备注
+- 复制 Excel 单元格区域时优先保存为可粘贴的文本表格，避免被 DIB 预览误识别为图片，并保留空单元格边界
+- 强化 Windows 图片剪贴板的内存边界与资源释放校验，降低原生堆损坏导致程序退出的风险
 - 新增**资源管理器地址**分类，可识别 Windows 盘符路径、UNC 网络路径以及部分 Shell 地址，并自动迁移已有的地址记录
 - 文本、链接、资源管理器地址和文件路径均可使用鼠标拖选；选中文字时不会误触整条记录的粘贴
 - 链接支持按住 `Ctrl` 后点击，使用系统默认浏览器打开；按住 `Ctrl` 悬停时会显示下划线和指针反馈
